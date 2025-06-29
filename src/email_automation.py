@@ -62,7 +62,8 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
                     template_name="first_followup",
                     tavily_results=tavily_results,
                     recipient_data=recipient_data,
-                    sender_data=sender_data
+                    sender_data=sender_data,
+                    resume_text=resume_text
                 )
                 
                 message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, follow_up_subject, follow_up_body, resume_path)
@@ -93,7 +94,8 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
                     template_name="final_followup",
                     tavily_results=tavily_results,
                     recipient_data=recipient_data,
-                    sender_data=sender_data
+                    sender_data=sender_data,
+                    resume_text=resume_text
                 )
 
                 message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, follow_up_subject, follow_up_body, resume_path)
