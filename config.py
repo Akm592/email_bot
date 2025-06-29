@@ -6,7 +6,7 @@ dotenv.load_dotenv()
 
 # Google Sheet Configuration
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID') # IMPORTANT: Replace with your actual Google Sheet ID
-RANGE_NAME = os.getenv('RANGE_NAME') # Adjust based on your sheet columns
+RANGE_NAME = os.getenv('RANGE_NAME', 'Sheet1!A:K') # Adjust based on your sheet columns
 
 # Email Configuration
 SENDER_EMAIL = os.getenv('SENDER_EMAIL') # IMPORTANT: Replace with your actual sender email
