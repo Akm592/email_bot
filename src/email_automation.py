@@ -2,6 +2,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 import os
+import json
+import logging
+
 
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, check_for_replies, clean_email_address
 from src.email_generator import populate_template # Import populate_template

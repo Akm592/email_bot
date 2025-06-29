@@ -1,6 +1,9 @@
 # config.py
 import os
 import dotenv
+
+dotenv.load_dotenv()
+
 # Google Sheet Configuration
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID') # IMPORTANT: Replace with your actual Google Sheet ID
 RANGE_NAME = os.getenv('RANGE_NAME') # Adjust based on your sheet columns

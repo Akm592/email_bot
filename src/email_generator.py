@@ -10,9 +10,15 @@ from .templates import EMAIL_TEMPLATES, FOLLOWUP_TEMPLATES, SIGNATURE
 MODEL_NAME = "gemini-2.0-flash-lite"
 AI_ML_RESUME_PATH = config.AI_ML_RESUME
 FULLSTACK_RESUME_PATH = config.FULLSTACK_RESUME
+gem_key=config.GEMINI_API_KEY
+
 
 try:
-    genai.configure(api_key=config.GEMINI_API_KEY)
+   
+
+    genai.configure(api_key=gem_key)
+ 
+  
 except Exception as e:
     print(f"Error configuring Gemini API: {e}")
 
