@@ -249,6 +249,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         
         # Also load initial dataframe data for the UI
         initial_df = load_data()
+        return initial_df, initial_df
     demo.load(_preload_data_on_startup, outputs=[output_dataframe, monitoring_dataframe])
 
 demo.launch()
