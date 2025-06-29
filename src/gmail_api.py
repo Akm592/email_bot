@@ -13,7 +13,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import quopri
 
-import quopri
+
 
 def clean_email_address(email):
     email = str(email).strip()
