@@ -418,7 +418,8 @@ def generate_fresher_email(
         template_name=template_name,
         tavily_results=tavily_results,
         recipient_data=recipient_data,
-        sender_data=sender_data
+        sender_data=sender_data,
+        resume_text=resume_text
     )
 
     # 5. --- THIS IS THE GUARDRAIL ---
