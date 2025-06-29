@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.log
+venv/
+env/
+
+# Sensitive files and generated data
+config.py
+credentials.json
+email_performance.json
+token_sheets.json
+token.json
+data/emails.csv
+data/hr_emails.xlsx
+resumes/
+data/tavily_cache.json
