@@ -4,6 +4,7 @@ __pycache__/
 *.log
 venv/
 env/
+.env
 
 # Sensitive files and generated data
 
