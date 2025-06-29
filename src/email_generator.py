@@ -326,6 +326,9 @@ def populate_template(template_type: str, template_name: str, tavily_results: st
         f"3. Mission & Values: {tavily_results.get('mission_and_values')}"
     )
 
+    if template_name == "value_add_followup":
+        tavily_research_summary += f"\n4. Recent Company Updates (for value-add follow-up): {tavily_results.get('recent_news_for_followup', 'No specific recent updates found.')}"
+
     prompt = f"""
     You are a master copywriter specializing in professional emails. Your task is to take a template and fill its placeholders to create a compelling cold email.
 
@@ -358,7 +361,9 @@ def populate_template(template_type: str, template_name: str, tavily_results: st
     4.  The final email body must be formatted with simple HTML (`<p>` and `<br>`).
     5.  Your entire response MUST be a single, valid JSON object with two keys: "subject" and "body". The body should NOT include my signature.
     6.  If this is a follow-up email (template_type is 'followup'), briefly reference a specific point from the initial research (e.g., {tavily_results.get('recent_news')} or {tavily_results.get('mission_and_values')}) to remind the recipient why you are interested. Do not repeat the entire first email.
-    7. CRITICAL: Every new line or paragraph break MUST be an HTML tag (<br> or <p>). Do not use \n.
+    7.  If the template is `value_add_followup`, incorporate the `Recent Company Updates` from the Tavily research into the email to provide new, relevant information.
+    8. CRITICAL: Every new line or paragraph break MUST be an HTML tag (<br> or <p>). Do not use \n.
+"""
 
     **Example JSON Output:**
     {{

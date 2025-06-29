@@ -31,6 +31,7 @@ EXPECTED_COLUMNS = {
     "Sent Date": str,
     "Follow-up 1 Date": str,
     "Follow-up 2 Date": str,
+    "Follow-up 3 Date": str,
     "Response Status": str,
     "Company Info": str
 }

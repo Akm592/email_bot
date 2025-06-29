@@ -29,3 +29,9 @@ YOUR_NAME = "Ashish Kumar Mishra"
 YOUR_DEGREE = "B.Tech in Information Technology"
 YOUR_KEY_SKILLS = "AI, Machine Learning, Fullstack Development, Data Science"
 YOUR_PROJECT_EXPERIENCE = "built an AI platform that boosted processing speed by 3.5x and cut semantic search latency by 60%"
+
+# Follow-up Campaign Settings
+FOLLOWUP_1_DAYS = 3
+FOLLOWUP_2_DAYS_AFTER_1 = 7
+FOLLOWUP_3_DAYS_AFTER_2 = 7
+PAUSE_FOR_AUTOREPLY_DAYS = 7
