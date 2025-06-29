@@ -6,7 +6,7 @@ venv/
 env/
 
 # Sensitive files and generated data
-config.py
+
 credentials.json
 email_performance.json
 token_sheets.json
