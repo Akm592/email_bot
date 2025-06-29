@@ -190,75 +190,7 @@ def choose_initial_template(tavily_results: str, role_applied_for: str) -> str:
         print(f"Gemini error during template selection: {e}")
         return "general_startup"
 
-def populate_template(template_type: str, template_name: str, tavily_results: str, recipient_data: dict, sender_data: dict) -> tuple[str, str]:
-    """
-    Uses Gemini to intelligently fill in the placeholders of a chosen template for both subject and body.
-    Returns: A tuple containing the (subject, body).
-    """
-    model = genai.GenerativeModel(MODEL_NAME)
 
-    if template_type == 'initial':
-        template_text = EMAIL_TEMPLATES.get(template_name, EMAIL_TEMPLATES['project_showcase'])
-    elif template_type == 'followup':
-        template_text = FOLLOWUP_TEMPLATES.get(template_name, FOLLOWUP_TEMPLATES['first_followup'])
-    else:
-        raise ValueError("Invalid template_type specified.")
-
-    prompt = f"""
-    You are a master copywriter specializing in professional emails. Your task is to take a template and fill its placeholders with personalized information to create a compelling cold email.
-
-    **Recipient and Company Data:**
-    - Recipient Name: {recipient_data.get('Recipient Name')}
-    - Company Name: {recipient_data.get('Company')}
-    - Specific Role (if any): {recipient_data.get('Title')}
-
-    **My Personal Details:**
-    - My Name: {sender_data.get('name')}
-    - My Degree: {sender_data.get('degree')}
-    - My Key Skills: {sender_data.get('key_skills')}
-    - Relevant Project Experience: {sender_data.get('project_experience')}
-    - Graduation Timeline: {determine_graduation_timeline()}
-
-    **Company Research from Tavily (for context):**
-    {tavily_results}
-
-    **Email Template to Populate:**
-    ---
-    {template_text}
-    ---
-
-    **Instructions:**
-    1.  Creatively and concisely fill in ALL placeholders in the template (e.g., `{{company_mission}}`, `{{valuable_lesson}}`) using the data provided.
-    2.  The final email body must be formatted with simple HTML for readability. Use `<p>` tags for paragraphs and `<br>` for line breaks.
-    3.  Your entire response MUST be a single, valid JSON object with two keys: "subject" and "body".
-
-    **Example JSON Output:**
-    {{
-      "subject": "Interest in AI/ML Opportunities at [Company Name]",
-      "body": "<p>Dear [Recipient Name],</p><p>I was impressed to learn about [Company Name]'s recent launch of...</p>"
-    }}
-    """
-    try:
-        response = model.generate_content(prompt)
-        # Clean the response to ensure it's valid JSON
-        cleaned_json_string = response.text.strip().replace('```json', '').replace('```', '').strip()
-        
-        # Parse the JSON response
-        email_data = json.loads(cleaned_json_string)
-        
-        subject = email_data.get("subject", "Following up") # Default subject on failure
-        body = email_data.get("body", "Could not generate email content.") # Default body on failure
-        
-        # Ensure the signature is correctly appended
-        return subject, body + SIGNATURE
-        
-    except (Exception, json.JSONDecodeError) as e:
-        print(f"Gemini error or JSON parsing failed during population: {e}")
-        print(f"Raw AI response was: {response.text.strip() if 'response' in locals() else 'No response'}")
-        # Fallback to a generic, non-HTML email
-        subject = f"Inquiry regarding opportunities at {recipient_data.get('Company')}"
-        body = f"Dear {recipient_data.get('Recipient Name')},\nI am writing to express my strong interest in potential roles at your company." + SIGNATURE.replace('<br>', '\n')
-        return subject, body
 
 def validate_email_quality(email_content: str, resume_data: str) -> dict:
     """Comprehensive email quality validation"""
@@ -367,7 +299,7 @@ def choose_optimal_template(tavily_results: str, recipient_info: dict, performan
     else:
         return context_based
 
-def populate_template(template_type: str, template_name: str, tavily_results: str, recipient_data: dict, sender_data: dict) -> tuple[str, str]:
+def populate_template(template_type: str, template_name: str, tavily_results: str, recipient_data: dict, sender_data: dict, resume_text: str) -> tuple[str, str]:
     """
     Uses Gemini to fill in template placeholders. It is explicitly told to use a placeholder
     for the recipient's name, which will be replaced later.
@@ -405,18 +337,22 @@ def populate_template(template_type: str, template_name: str, tavily_results: st
     **Company Research from Tavily (for context):**
     {tavily_research_summary}
 
+    **My Resume Text (for deep analysis):
+    {resume_text}
+
     **Email Template to Populate:**
     ---
     {template_text}
     ---
 
     **CRITICAL INSTRUCTIONS:**
-    1.  For the salutation (e.g., "Dear..."), you MUST use the exact placeholder `{{recipient_name_placeholder}}`. Do NOT use the actual recipient's name. For example, write "Dear {{recipient_name_placeholder}},"
-    2.  Creatively fill in all other placeholders (e.g., `{{company_mission}}`).
-    3.  The final email body must be formatted with simple HTML (`<p>` and `<br>`).
-    4.  Your entire response MUST be a single, valid JSON object with two keys: "subject" and "body". The body should NOT include my signature.
-    5.  If this is a follow-up email (template_type is 'followup'), briefly reference a specific point from the initial research (e.g., {tavily_results.get('recent_news')} or {tavily_results.get('mission_and_values')}) to remind the recipient why you are interested. Do not repeat the entire first email.
-    6. CRITICAL: Every new line or paragraph break MUST be an HTML tag (<br> or <p>). Do not use \n.
+    1.  You are a career strategist. Your primary source of truth for the candidate's skills is the provided resume text. Analyze it deeply and extract the most relevant project, skill, or achievement that aligns with the target company's profile. Use this insight to write the email.
+    2.  For the salutation (e.g., "Dear..."), you MUST use the exact placeholder `{{recipient_name_placeholder}}`. Do NOT use the actual recipient's name. For example, write "Dear {{recipient_name_placeholder}},"
+    3.  Creatively fill in all other placeholders (e.g., `{{company_mission}}`).
+    4.  The final email body must be formatted with simple HTML (`<p>` and `<br>`).
+    5.  Your entire response MUST be a single, valid JSON object with two keys: "subject" and "body". The body should NOT include my signature.
+    6.  If this is a follow-up email (template_type is 'followup'), briefly reference a specific point from the initial research (e.g., {tavily_results.get('recent_news')} or {tavily_results.get('mission_and_values')}) to remind the recipient why you are interested. Do not repeat the entire first email.
+    7. CRITICAL: Every new line or paragraph break MUST be an HTML tag (<br> or <p>). Do not use \n.
 
     **Example JSON Output:**
     {{
@@ -446,7 +382,8 @@ def generate_fresher_email(
     recipient_name: str,
     recipient_title: str,
     company_name: str,
-    role_type: str
+    role_type: str,
+    resume_text: str # Added resume_text as a direct argument
 ) -> dict:
     """
     Complete fresher-optimized email generation pipeline.
@@ -454,13 +391,11 @@ def generate_fresher_email(
     """
     print(" Starting fresher-optimized email generation...")
     
-    # 1. Choose optimal resume
+    # 1. Determine which resume type was chosen (for tracking/reporting)
     resume_choice = analyze_and_choose_resume(tavily_results, recipient_title)
-    resume_path = AI_ML_RESUME_PATH if resume_choice == "AI/ML" else FULLSTACK_RESUME_PATH
-    resume_text = load_resume_text(resume_path)
     
     if not resume_text:
-        return {"error": "Could not load resume"}
+        return {"error": "Resume text not provided."}
     
     # 2. Choose optimal template
     template_name = choose_initial_template(tavily_results, role_type)

@@ -4,12 +4,12 @@ import time
 import os
 
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, check_for_replies, clean_email_address
-from src.email_generator import populate_template, load_resume_text # Import populate_template and load_resume_text
+from src.email_generator import populate_template # Import populate_template
 from src.tavily_search import search_company_background # Import for company info
 from .templates import FOLLOWUP_TEMPLATES # Import follow-up templates
 import config
 
-def check_and_follow_up(df: pd.DataFrame):
+def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
     log_messages = []
     gmail_service = get_gmail_service()
     if not gmail_service:
@@ -39,8 +39,7 @@ def check_and_follow_up(df: pd.DataFrame):
             recipient_name = row["Recipient Name"]
             company_name = row["Company"]
             role_type = row["Resume Type"] # Using Resume Type as role_type for consistency
-            resume_path = config.AI_ML_RESUME if role_type == "AI/ML" else config.FULLSTACK_RESUME
-            resume_text = load_resume_text(resume_path)
+            resume_text = resume_cache.get(role_type)
             tavily_results = json.loads(row["Company Info"])
 
             # First follow-up (24 hours after sent date)

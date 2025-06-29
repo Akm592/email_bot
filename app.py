@@ -8,10 +8,13 @@ import json
 # --- FIX: Correctly import all necessary functions ---
 import config
 from src.tavily_search import search_company_background
-from src.email_generator import generate_fresher_email, track_email_performance, validate_email_quality
+from src.email_generator import generate_fresher_email, track_email_performance, validate_email_quality, load_resume_text # Import load_resume_text
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, clean_email_address
 from src.google_sheets_api import get_sheets_service, write_to_google_sheet
 from src.email_automation import check_and_follow_up
+
+# --- Global Cache for Resumes ---
+RESUME_CACHE = {}
 
 
 
@@ -103,10 +106,14 @@ def start_outreach(input_csv_file, manual_resume_override):
 
             log_messages.append(f"--- Processing: {recipient_name} at {company_name} ---")
             
-            # --- FIX: Use Tavily for research, not the old scraper ---
-            log_messages.append("1. Researching company with Tavily...")
-            company_info = search_company_background(company_name)
-            df.loc[index, 'Company Info'] = json.dumps(company_info)
+            # AI Decides which resume type to use
+            final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
+            # Instant Fetch: Retrieve the corresponding text instantly from the global cache
+            resume_text = RESUME_CACHE.get(final_resume_type)
+
+            if not resume_text:
+                log_messages.append(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
+                continue
 
             if company_info:
                 log_messages.append("-> Research complete.")
@@ -117,7 +124,8 @@ def start_outreach(input_csv_file, manual_resume_override):
                     recipient_name=recipient_name,
                     recipient_title=recruiter_title,
                     company_name=company_name,
-                    role_type=manual_resume_override if manual_resume_override else "AI/ML" # Default to AI/ML if no override
+                    role_type=final_resume_type, # Use the AI-chosen resume type
+                    resume_text=resume_text # Pass the pre-loaded resume text
                 )
 
                 if "error" in email_generation_result:
@@ -164,8 +172,8 @@ def start_outreach(input_csv_file, manual_resume_override):
 
 def _check_and_follow_up_wrapper():
     """Wrapper function to integrate follow-up logic with the global df."""
-    global df
-    updated_df, log_messages = check_and_follow_up(df)
+    global df, RESUME_CACHE
+    updated_df, log_messages = check_and_follow_up(df, RESUME_CACHE)
     df = updated_df
     save_data()
     return df, log_messages
@@ -223,10 +231,20 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     )
     
     # --- FIX: Correct way to load initial data for multiple dataframes ---
-    def _load_initial_data_for_ui():
+    def _preload_data_on_startup():
+        global RESUME_CACHE
+        print("Pre-loading resume data...")
+        try:
+            RESUME_CACHE["AI/ML"] = load_resume_text(config.AI_ML_RESUME)
+            RESUME_CACHE["Fullstack"] = load_resume_text(config.FULLSTACK_RESUME)
+            print("Resume data pre-loaded successfully.")
+        except Exception as e:
+            print(f"Error pre-loading resume data: {e}")
+        
+        # Also load initial dataframe data for the UI
         initial_df = load_data()
         return initial_df, initial_df
 
-    demo.load(_load_initial_data_for_ui, outputs=[output_dataframe, monitoring_dataframe])
+    demo.load(_preload_data_on_startup, outputs=[output_dataframe, monitoring_dataframe]))
 
 demo.launch()
