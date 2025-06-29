@@ -1,0 +1,6 @@
+gradio
+pandas
+tavily-python
+google-generativeai
+pdfplumber
+google-api-python-client
