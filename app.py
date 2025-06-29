@@ -84,12 +84,22 @@ def start_outreach(input_csv_file, manual_resume_override):
             new_contacts_df["Recipient Email"] = new_contacts_df["Recipient Email"].astype(str).apply(clean_email_address)
             new_contacts_df["Email Status"] = "Pending"
             
-            # Use concat and drop_duplicates to merge new contacts
-            df = pd.concat([df, new_contacts_df], ignore_index=True).astype(EXPECTED_COLUMNS)
-            df.drop_duplicates(subset=["Recipient Email"], keep="last", inplace=True)
+            # Create a master list of known emails
+            known_emails = df["Recipient Email"].tolist()
+
+            # Filter out contacts that are already in the master list
+            genuinely_new_contacts_df = new_contacts_df[~new_contacts_df["Recipient Email"].isin(known_emails)].copy()
+
+            if genuinely_new_contacts_df.empty:
+                log_messages.append("No new contacts found in the uploaded CSV. All contacts already exist in the system.")
+                return df, "\n".join(log_messages)
+
+            # Add only genuinely new contacts
+            df = pd.concat([df, genuinely_new_contacts_df], ignore_index=True).astype(EXPECTED_COLUMNS)
+            df.drop_duplicates(subset=["Recipient Email"], keep="last", inplace=True) # Ensure no duplicates after concat
             df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS) # Enforce schema
             save_data()
-            log_messages.append(f"Loaded {len(new_contacts_df)} new contacts. Removed duplicates.")
+            log_messages.append(f"Loaded {len(genuinely_new_contacts_df)} new, unique contacts. Removed duplicates.")
         except Exception as e:
             log_messages.append(f"Error processing uploaded CSV: {e}")
             return df, "\n".join(log_messages)

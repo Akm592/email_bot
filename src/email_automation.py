@@ -45,9 +45,9 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
             resume_text = resume_cache.get(role_type)
             tavily_results = json.loads(row["Company Info"])
 
-            # First follow-up (24 hours after sent date)
-            if (today - sent_date).days >= 1 and row["Follow-up 1 Date"] == "":
-                log_messages.append(f"Sending first follow-up to {recipient_email}...")
+            # Single follow-up (between 3 and 7 days after sent date)
+            if (today - sent_date).days >= 3 and (today - sent_date).days <= 7 and row["Follow-up 1 Date"] == "":
+                log_messages.append(f"Sending follow-up to {recipient_email}...")
                 
                 recipient_data = {
                     'Recipient Name': recipient_name,
@@ -60,9 +60,17 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
                     'key_skills': config.YOUR_KEY_SKILLS,
                     'project_experience': config.YOUR_PROJECT_EXPERIENCE,
                 }
+                
+                # Determine resume path for attachment
+                resume_path = config.AI_ML_RESUME if role_type == "AI/ML" else config.FULLSTACK_RESUME
+
+                if not os.path.exists(resume_path):
+                    log_messages.append(f"-> Resume not found at {resume_path}. Skipping follow-up.")
+                    continue
+
                 follow_up_subject, follow_up_body = populate_template(
                     template_type='followup',
-                    template_name="first_followup",
+                    template_name="first_followup", # Using a single follow-up template
                     tavily_results=tavily_results,
                     recipient_data=recipient_data,
                     sender_data=sender_data,
@@ -72,41 +80,9 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
                 message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, follow_up_subject, follow_up_body, resume_path)
                 if send_message(gmail_service, "me", message):
                     df.loc[index, "Follow-up 1 Date"] = today.strftime("%Y-%m-%d")
-                    log_messages.append(f"First follow-up sent to {recipient_email}.")
+                    log_messages.append(f"Follow-up sent to {recipient_email}.")
                     time.sleep(10) # Rate limit
                 else:
-                    log_messages.append(f"Failed to send first follow-up to {recipient_email}.")
-
-            # Second follow-up (72 hours after sent date)
-            if (today - sent_date).days >= 3 and row["Follow-up 2 Date"] == "" and row["Follow-up 1 Date"] != "":
-                log_messages.append(f"Sending second follow-up to {recipient_email}...")
-                
-                recipient_data = {
-                    'Recipient Name': recipient_name,
-                    'Company': company_name,
-                    'Title': role_type
-                }
-                sender_data = {
-                    'name': config.YOUR_NAME,
-                    'degree': config.YOUR_DEGREE,
-                    'key_skills': config.YOUR_KEY_SKILLS,
-                    'project_experience': config.YOUR_PROJECT_EXPERIENCE,
-                }
-                follow_up_subject, follow_up_body = populate_template(
-                    template_type='followup',
-                    template_name="final_followup",
-                    tavily_results=tavily_results,
-                    recipient_data=recipient_data,
-                    sender_data=sender_data,
-                    resume_text=resume_text
-                )
-
-                message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, follow_up_subject, follow_up_body, resume_path)
-                if send_message(gmail_service, "me", message):
-                    df.loc[index, "Follow-up 2 Date"] = today.strftime("%Y-%m-%d")
-                    log_messages.append(f"Second follow-up sent to {recipient_email}.")
-                    time.sleep(10) # Rate limit
-                else:
-                    log_messages.append(f"Failed to send second follow-up to {recipient_email}.")
+                    log_messages.append(f"Failed to send follow-up to {recipient_email}.")
 
     return df, "\n".join(log_messages)
