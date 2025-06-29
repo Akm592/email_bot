@@ -13,7 +13,15 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import quopri
 
+import google.generativeai as genai
+import config
 
+SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
+
+try:
+    genai.configure(api_key=config.GEMINI_API_KEY)
+except Exception as e:
+    print(f"Error configuring Gemini API in gmail_api: {e}")
 
 def clean_email_address(email):
     email = str(email).strip()
@@ -87,16 +95,6 @@ def send_message(service, user_id, message):
             import time, random
             time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
     return None
-
-import google.generativeai as genai
-import config
-
-SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
-
-try:
-    genai.configure(api_key=config.GEMINI_API_KEY)
-except Exception as e:
-    print(f"Error configuring Gemini API in gmail_api: {e}")
 
 def classify_email_body(email_body: str) -> str:
     model = genai.GenerativeModel("gemini-2.0-flash-lite")
