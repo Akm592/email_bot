@@ -8,10 +8,12 @@ import json
 # --- FIX: Correctly import all necessary functions ---
 import config
 from src.tavily_search import search_company_background
-from src.email_generator import generate_fresher_email, track_email_performance, validate_email_quality, load_resume_text # Import load_resume_text
+from src.email_generator import generate_fresher_email, track_email_performance, validate_email_quality, load_resume_text, analyze_and_choose_resume # Import load_resume_text and analyze_and_choose_resume
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, clean_email_address
 from src.google_sheets_api import get_sheets_service, write_to_google_sheet
 from src.email_automation import check_and_follow_up
+
+
 
 # --- Global Cache for Resumes ---
 RESUME_CACHE = {}
@@ -106,18 +108,22 @@ def start_outreach(input_csv_file, manual_resume_override):
 
             log_messages.append(f"--- Processing: {recipient_name} at {company_name} ---")
             
-            # AI Decides which resume type to use
-            final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
-            # Instant Fetch: Retrieve the corresponding text instantly from the global cache
-            resume_text = RESUME_CACHE.get(final_resume_type)
-
-            if not resume_text:
-                log_messages.append(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
-                continue
+            log_messages.append("1. Researching company with Tavily...")
+            company_info = search_company_background(company_name)
+            df.loc[index, 'Company Info'] = json.dumps(company_info)
 
             if company_info:
                 log_messages.append("-> Research complete.")
-                
+
+                # AI Decides which resume type to use
+                final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
+                # Instant Fetch: Retrieve the corresponding text instantly from the global cache
+                resume_text = RESUME_CACHE.get(final_resume_type)
+
+                if not resume_text:
+                    log_messages.append(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
+                    continue
+
                 log_messages.append("2. Generating personalized email with AI...")
                 email_generation_result = generate_fresher_email(
                     tavily_results=company_info,
@@ -243,8 +249,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         
         # Also load initial dataframe data for the UI
         initial_df = load_data()
-        return initial_df, initial_df
-
-    demo.load(_preload_data_on_startup, outputs=[output_dataframe, monitoring_dataframe]))
-
-demo.launch()
+    demo.load(_preload_data_on_startup, outputs=[output_dataframe, monitoring_dataframe])
