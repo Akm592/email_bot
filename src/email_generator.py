@@ -108,6 +108,48 @@ def determine_graduation_timeline() -> str:
     else:
         return "upcoming semester"
 
+def determine_graduation_timeline() -> str:
+    """Determine urgency based on current date and graduation timeline"""
+    current_month = datetime.now().month
+    if current_month >= 4 and current_month <= 6:
+        return "May 2025"  # Final semester
+    elif current_month >= 10 and current_month <= 12:
+        return "December 2025"  # Mid-year graduation
+    else:
+        return "upcoming semester"
+
+def extract_sender_details_from_resume(resume_text: str) -> dict:
+    """Uses Gemini to extract key personal details from a resume text."""
+    model = genai.GenerativeModel(MODEL_NAME)
+    prompt = f"""
+    From the following resume text, extract the candidate's degree, a concise list of their key technical skills,
+    a summary of their most impressive project accomplishment, and their full name.
+
+    Return this as a JSON object with the following keys:
+    - degree: (e.g., "B.Tech in Information Technology")
+    - key_skills: (comma-separated list, e.g., "Python, TensorFlow, PyTorch, RAG")
+    - project_experience: (concise, one-sentence summary of the most impressive and quantifiable project)
+    - name: (Full name of the candidate)
+
+    Resume Text:
+    {resume_text}
+
+    Example JSON Output:
+    {{
+      "degree": "B.Tech in Information Technology",
+      "key_skills": "Python, TensorFlow, PyTorch, RAG, CI/CD, React.js",
+      "project_experience": "Developed an AI platform that enhanced data processing speed by 3.5x and significantly reduced search latency by 60%.",
+      "name": "John Doe"
+    }}
+    """
+    try:
+        response = model.generate_content(prompt)
+        cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
+        return json.loads(cleaned_response)
+    except Exception as e:
+        print(f"Error extracting sender details from resume: {e}")
+        return {"degree": "", "key_skills": "", "project_experience": "", "name": ""}
+
 def extract_achievement_keywords(resume_data: str) -> list:
     """Extract quantified achievements for subject lines and hooks"""
     model = genai.GenerativeModel(MODEL_NAME)
@@ -363,7 +405,7 @@ def populate_template(template_type: str, template_name: str, tavily_results: st
     6.  If this is a follow-up email (template_type is 'followup'), briefly reference a specific point from the initial research (e.g., {tavily_results.get('recent_news')} or {tavily_results.get('mission_and_values')}) to remind the recipient why you are interested. Do not repeat the entire first email.
     7.  If the template is `value_add_followup`, incorporate the `Recent Company Updates` from the Tavily research into the email to provide new, relevant information.
     8. CRITICAL: Every new line or paragraph break MUST be an HTML tag (<br> or <p>). Do not use \n.
-"""
+
 
     **Example JSON Output:**
     {{
@@ -388,6 +430,28 @@ def populate_template(template_type: str, template_name: str, tavily_results: st
         body = f"<p>Dear {{recipient_name_placeholder}},</p><p>I am writing to express my strong interest in potential roles at your company.</p>"
         return subject, body
 
+def is_email_safe_to_send(email_subject: str, email_body: str, role_type: str, company_name: str) -> str:
+    """Uses Gemini to act as a quality guardrail, checking for relevance and critical errors."""
+    model = genai.GenerativeModel(MODEL_NAME)
+    prompt = f"""
+    You are a Quality Assurance agent. The user is a '{role_type}' graduate applying to '{company_name}'.
+
+    Analyze the following email subject and body. Does this email contain any highly irrelevant topics,
+    such as asking for a role in HR, marketing, sales, or any other field that is completely unrelated to the user's profile?
+    Does it mention goals or technologies that are nonsensical for a tech applicant?
+
+    Email Subject: {email_subject}
+    Email Body: {email_body}
+
+    Your entire response MUST be a single word: 'APPROVE' or 'REJECT'.
+    """
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip().upper()
+    except Exception as e:
+        print(f"Error during email safety check: {e}")
+        return "REJECT" # Default to reject on error for safety
+
 def generate_fresher_email(
     tavily_results: str,
     recipient_name: str,
@@ -408,6 +472,11 @@ def generate_fresher_email(
     if not resume_text:
         return {"error": "Resume text not provided."}
     
+    # Extract sender details directly from the resume
+    sender_details = extract_sender_details_from_resume(resume_text)
+    if not sender_details["name"] or not sender_details["degree"]:
+        return {"error": "Could not extract essential sender details from resume."}
+
     # 2. Choose optimal template
     template_name = choose_initial_template(tavily_results, role_type)
     
@@ -417,10 +486,10 @@ def generate_fresher_email(
         'Title': recipient_title
     }
     sender_data = {
-        'name': config.YOUR_NAME,
-        'degree': config.YOUR_DEGREE,
-        'key_skills': config.YOUR_KEY_SKILLS,
-        'project_experience': config.YOUR_PROJECT_EXPERIENCE,
+        'name': sender_details["name"],
+        'degree': sender_details["degree"],
+        'key_skills': sender_details["key_skills"],
+        'project_experience': sender_details["project_experience"],
     }
 
     # 4. Generate email with a placeholder for the name
@@ -438,10 +507,18 @@ def generate_fresher_email(
     sanitized_body = ai_generated_body.replace('\n', '<br>')
     final_email_body = sanitized_body.replace('{{recipient_name_placeholder}}', recipient_name).replace('{recipient_name_placeholder}', recipient_name) + SIGNATURE
 
-    # 6. Validate quality
+    # 6. Run the pre-send quality guardrail
+    safety_check_result = is_email_safe_to_send(subject_line, final_email_body, role_type, company_name)
+    if safety_check_result == "REJECT":
+        print(f"[GUARDRAIL REJECTED]: Email for {company_name} was deemed irrelevant and has been blocked.")
+        return {"error": "Email rejected by safety guardrail due to irrelevant content."}
+    else:
+        print("Failsafe check passed.")
+
+    # 7. Validate quality
     quality_report = validate_email_quality(f"Subject: {subject_line}\n\n{final_email_body}", resume_text)
 
-    # 7. Prepare result with the finalized content
+    # 8. Prepare result with the finalized content
     result = {
         "email_subject": subject_line,
         "email_content": final_email_body, # Return the final, processed body
