@@ -4,11 +4,13 @@ from datetime import datetime
 import os
 import time
 import json
+import logging
+import logging.handlers
 
 # --- FIX: Correctly import all necessary functions ---
 import config
 from src.tavily_search import search_company_background
-from src.email_generator import generate_fresher_email, track_email_performance, validate_email_quality, load_resume_text, analyze_and_choose_resume # Import load_resume_text and analyze_and_choose_resume
+from src.email_generator import generate_fresher_email, track_email_performance, load_resume_text, analyze_and_choose_resume # Import load_resume_text and analyze_and_choose_resume
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, clean_email_address
 from src.google_sheets_api import get_sheets_service, write_to_google_sheet
 from src.email_automation import check_and_follow_up
@@ -17,6 +19,8 @@ from src.email_automation import check_and_follow_up
 
 # --- Global Cache for Resumes ---
 RESUME_CACHE = {}
+GMAIL_SERVICE = None
+SHEETS_SERVICE = None
 
 
 
@@ -62,23 +66,25 @@ def save_data():
 
 def sync_to_google_sheets_gradio():
     """Syncs the current DataFrame to the configured Google Sheet."""
-    global df
-    log_messages = []
-    sheets_service = get_sheets_service()
-    if sheets_service:
+    global df, SHEETS_SERVICE
+    logging.info("Sync to Google Sheets initiated.")
+    if SHEETS_SERVICE:
         try:
-            write_to_google_sheet(sheets_service, config.SPREADSHEET_ID, config.RANGE_NAME, df)
-            log_messages.append("Data synced to Google Sheets successfully!")
+            write_to_google_sheet(SHEETS_SERVICE, config.SPREADSHEET_ID, config.RANGE_NAME, df)
+            logging.info("Data synced to Google Sheets successfully!")
+            return "Data synced to Google Sheets successfully!"
         except Exception as e:
-            log_messages.append(f"Error syncing to Google Sheets: {e}")
+            logging.error(f"Error syncing to Google Sheets: {e}")
+            return f"Error syncing to Google Sheets: {e}"
     else:
-        log_messages.append("Failed to obtain Google Sheets service. Sync skipped.")
-    return "\n".join(log_messages)
+        logging.warning("Google Sheets service not available. Sync skipped.")
+        return "Google Sheets service not available. Sync skipped."
+
 
 def start_outreach(input_csv_file, manual_resume_override):
     """Processes an uploaded CSV, uses AI to analyze, and starts the outreach process."""
-    global df
-    log_messages = []
+    global df, GMAIL_SERVICE
+    logging.info("Start Outreach button clicked.")
 
     if input_csv_file is not None:
         try:
@@ -94,23 +100,22 @@ def start_outreach(input_csv_file, manual_resume_override):
             genuinely_new_contacts_df = new_contacts_df[~new_contacts_df["Recipient Email"].isin(known_emails)].copy()
 
             if genuinely_new_contacts_df.empty:
-                log_messages.append("No new contacts found in the uploaded CSV. All contacts already exist in the system.")
-                return df, "\n".join(log_messages)
+                logging.info("No new contacts found in the uploaded CSV. All contacts already exist in the system.")
+                return df, "No new contacts found in the uploaded CSV. All contacts already exist in the system."
 
             # Add only genuinely new contacts
             df = pd.concat([df, genuinely_new_contacts_df], ignore_index=True).astype(EXPECTED_COLUMNS)
             df.drop_duplicates(subset=["Recipient Email"], keep="last", inplace=True) # Ensure no duplicates after concat
             df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS) # Enforce schema
             save_data()
-            log_messages.append(f"Loaded {len(genuinely_new_contacts_df)} new, unique contacts. Removed duplicates.")
+            logging.info(f"Loaded {len(genuinely_new_contacts_df)} new, unique contacts. Removed duplicates.")
         except Exception as e:
-            log_messages.append(f"Error processing uploaded CSV: {e}")
-            return df, "\n".join(log_messages)
+            logging.error(f"Error processing uploaded CSV file for {input_csv_file.name}: {e}")
+            return df, f"Error processing uploaded CSV file for {input_csv_file.name}: {e}"
 
-    gmail_service = get_gmail_service()
-    if not gmail_service:
-        log_messages.append("Failed to obtain Gmail service. Cannot proceed with outreach.")
-        return df, "\n".join(log_messages)
+    if not GMAIL_SERVICE:
+        logging.warning("Gmail service not available. Cannot proceed with outreach.")
+        return df, "Gmail service not available. Cannot proceed with outreach."
 
     for index, row in df.iterrows():
         if row["Email Status"] == "Pending":
@@ -119,14 +124,14 @@ def start_outreach(input_csv_file, manual_resume_override):
             company_name = row["Company"]
             recruiter_title = row.get("Title", "")
 
-            log_messages.append(f"--- Processing: {recipient_name} at {company_name} ---")
+            logging.info(f"--- Processing: {recipient_name} at {company_name} ---")
             
-            log_messages.append("1. Researching company with Tavily...")
+            logging.info("1. Researching company with Tavily...")
             company_info = search_company_background(company_name)
             df.loc[index, 'Company Info'] = json.dumps(company_info)
 
             if company_info:
-                log_messages.append("-> Research complete.")
+                logging.info("-> Research complete.")
 
                 # AI Decides which resume type to use
                 final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
@@ -134,10 +139,10 @@ def start_outreach(input_csv_file, manual_resume_override):
                 resume_text = RESUME_CACHE.get(final_resume_type)
 
                 if not resume_text:
-                    log_messages.append(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
+                    logging.warning(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
                     continue
 
-                log_messages.append("2. Generating personalized email with AI...")
+                logging.info("2. Generating personalized email with AI...")
                 email_generation_result = generate_fresher_email(
                     tavily_results=company_info,
                     recipient_name=recipient_name,
@@ -148,7 +153,7 @@ def start_outreach(input_csv_file, manual_resume_override):
                 )
 
                 if "error" in email_generation_result:
-                    log_messages.append(f"-> Email generation failed: {email_generation_result['error']}. Skipping.")
+                    logging.error(f"-> Email generation failed: {email_generation_result['error']}. Skipping.")
                     continue
 
                 email_subject = email_generation_result["email_subject"]
@@ -157,7 +162,7 @@ def start_outreach(input_csv_file, manual_resume_override):
                 chosen_template_name = email_generation_result["template_used"]
                 safety_check_result = email_generation_result["safety_check_result"]
 
-                log_messages.append(f"-> AI generated email using '{chosen_template_name}' template. Quality Score: {email_generation_result['quality_score']}")
+                logging.info(f"-> AI generated email using '{chosen_template_name}' template. Quality Score: {email_generation_result['quality_score']}")
                 
                 # Track email performance
                 track_email_performance(
@@ -171,38 +176,40 @@ def start_outreach(input_csv_file, manual_resume_override):
                     resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
 
                     if not os.path.exists(resume_path):
-                        log_messages.append(f"-> Resume not found at {resume_path}. Skipping.")
+                        logging.warning(f"-> Resume not found at {resume_path}. Skipping.")
                         continue
 
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, email_subject, email_body, resume_path)
-                    if send_message(gmail_service, "me", message):
+                    if send_message(GMAIL_SERVICE, "me", message):
                         df.loc[index, "Email Status"] = "Sent"
                         df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
                         df.loc[index, "Resume Type"] = final_resume_type
-                        log_messages.append(f"--> Email sent successfully to {recipient_email}.")
+                        logging.info(f"--> Email sent successfully to {recipient_email}.")
                         save_data()
                         time.sleep(15) # Increased sleep time for more API calls
                     else:
-                        log_messages.append(f"--> FAILED to send email to {recipient_email}.")
+                        logging.error(f"--> FAILED to send email to {recipient_email}.")
                 else: # safety_check_result == "REJECT"
                     df.loc[index, "Email Status"] = "Pending Review"
                     df.loc[index, "Generated Subject"] = email_subject
                     df.loc[index, "Generated Body"] = email_body
-                    log_messages.append(f"[FLAGGED FOR REVIEW]: Email for {company_name} has been flagged and requires manual review.")
+                    logging.warning(f"[FLAGGED FOR REVIEW]: Email for {company_name} has been flagged and requires manual review.")
                     save_data() # Save immediately after flagging
             else:
-                log_messages.append(f"--> Failed to get company info from Tavily. Skipping.")
+                logging.warning(f"--> Failed to get company info from Tavily. Skipping.")
 
     save_data()
-    log_messages.append("\n--- Outreach complete for all pending contacts. ---")
-    return df, "\n".join(log_messages)
+    logging.info("\n--- Outreach complete for all pending contacts. ---")
+    return df, "Outreach complete for all pending contacts."
 
 def _check_and_follow_up_wrapper():
     """Wrapper function to integrate follow-up logic with the global df."""
-    global df, RESUME_CACHE
-    updated_df, log_messages = check_and_follow_up(df, RESUME_CACHE)
+    global df, RESUME_CACHE, GMAIL_SERVICE
+    logging.info("Check Replies & Send Follow-ups initiated.")
+    updated_df, log_messages = check_and_follow_up(GMAIL_SERVICE, df, RESUME_CACHE)
     df = updated_df
     save_data()
+    logging.info("Check Replies & Send Follow-ups complete.")
     return df, log_messages
 
 def get_pending_review_emails():
@@ -210,16 +217,17 @@ def get_pending_review_emails():
     global df
     return df[df["Email Status"] == "Pending Review"]
 
-def display_for_review(evt: gr.SelectData):
+def display_for_review(pending_df, evt: gr.SelectData):
     """Displays the selected email for review and editing."""
     global df
     if evt.index is None:
+        logging.warning("No row selected for review.")
         return "", "", get_pending_review_emails(), "No row selected.", None
     
     selected_row_index = evt.index[0] # Get the actual index from the original df
     
-    pending_df = get_pending_review_emails()
     if selected_row_index >= len(pending_df):
+        logging.error("Invalid row selected for review.")
         return "", "", get_pending_review_emails(), "Invalid row selected.", None
         
     original_df_index = pending_df.iloc[selected_row_index].name
@@ -229,82 +237,78 @@ def display_for_review(evt: gr.SelectData):
     company = df.loc[original_df_index, "Company"]
     recipient = df.loc[original_df_index, "Recipient Name"]
     
-    log_message = f"Loaded email for {recipient} at {company} (Index: {original_df_index})"
-    return subject, body, get_pending_review_emails(), log_message, original_df_index
+    logging.info(f"Loaded email for {recipient} at {company} (Index: {original_df_index}) for manual review.")
+    return subject, body, get_pending_review_emails(), f"Loaded email for {recipient} at {company} (Index: {original_df_index})", original_df_index
 
 def manually_send_email(selected_row_index_str, subject, body):
     """Sends the manually approved email."""
-    global df
-    log_messages = []
+    global df, GMAIL_SERVICE
+    logging.info("Manually send email initiated.")
     
     if not selected_row_index_str:
+        logging.warning("No email selected for manual sending.")
         return get_pending_review_emails(), "", "", "Please select an email to send."
 
     try:
         # Convert the string index back to integer
-        selected_row_index = int(selected_row_index_str)
-        
-        pending_df = get_pending_review_emails()
-        if selected_row_index >= len(pending_df):
-            return get_pending_review_emails(), "", "", "Invalid row selected for sending."
-        original_df_index = pending_df.iloc[selected_row_index].name
+        original_df_index = int(selected_row_index_str)
 
         row = df.loc[original_df_index]
         recipient_email = row["Recipient Email"]
         final_resume_type = row["Resume Type"]
         company_name = row["Company"]
 
-        gmail_service = get_gmail_service()
-        if not gmail_service:
-            log_messages.append("Failed to obtain Gmail service. Cannot send email.")
-            return get_pending_review_emails(), "", "", "\n".join(log_messages)
+        if not GMAIL_SERVICE:
+            logging.error("Gmail service not available. Cannot send email manually.")
+            return get_pending_review_emails(), "", "", "Gmail service not available. Cannot send email."
 
         resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
         if not os.path.exists(resume_path):
-            log_messages.append(f"Resume not found at {resume_path}. Cannot send email.")
-            return get_pending_review_emails(), "", "", "\n".join(log_messages)
+            logging.error(f"Resume not found at {resume_path}. Cannot send email manually.")
+            return get_pending_review_emails(), "", "", f"Resume not found at {resume_path}. Cannot send email."
 
         message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
-        if send_message(gmail_service, "me", message):
-            df.loc[original_df_index, "Email Status"] = "Sent (Manual)"
-            df.loc[original_df_index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
-            df.loc[original_df_index, "Generated Subject"] = ""
-            df.loc[original_df_index, "Generated Body"] = ""
-            save_data()
-            log_messages.append(f"Successfully sent manual email to {recipient_email} for {company_name}.")
-        else:
-            log_messages.append(f"FAILED to send manual email to {recipient_email} for {company_name}.")
+        try:
+            if send_message(GMAIL_SERVICE, "me", message):
+                df.loc[original_df_index, "Email Status"] = "Sent (Manual)"
+                df.loc[original_df_index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
+                df.loc[original_df_index, "Generated Subject"] = ""
+                df.loc[original_df_index, "Generated Body"] = ""
+                save_data()
+                logging.info(f"Successfully sent manual email to {recipient_email} for {company_name}.")
+                return get_pending_review_emails(), "", "", f"Successfully sent manual email to {recipient_email} for {company_name}."
+            else:
+                logging.error(f"FAILED to send manual email to {recipient_email} for {company_name}. send_message returned None.")
+                return get_pending_review_emails(), "", "", f"FAILED to send manual email to {recipient_email} for {company_name}."
+        except Exception as send_e:
+            logging.error(f"Exception during send_message for {recipient_email}: {send_e}")
+            return get_pending_review_emails(), "", "", f"Exception during send_message for {recipient_email}: {send_e}"
 
     except Exception as e:
-        log_messages.append(f"Error sending manual email: {e}")
-    
-    return get_pending_review_emails(), "", "", "\n".join(log_messages)
+        logging.error(f"General error in manually_send_email: {e}")
+        return get_pending_review_emails(), "", "", f"General error in manually_send_email: {e}"
 
 def discard_email(selected_row_index_str):
     """Discards the flagged email."""
     global df
-    log_messages = []
+    logging.info("Discard email initiated.")
 
     if not selected_row_index_str:
+        logging.warning("No email selected for discarding.")
         return get_pending_review_emails(), "", "", "Please select an email to discard."
 
     try:
-        selected_row_index = int(selected_row_index_str)
-        
-        pending_df = get_pending_review_emails()
-        if selected_row_index >= len(pending_df):
-            return get_pending_review_emails(), "", "", "Invalid row selected for discarding."
-        original_df_index = pending_df.iloc[selected_row_index].name
+        original_df_index = int(selected_row_index_str)
 
         df.loc[original_df_index, "Email Status"] = "Discarded"
         df.loc[original_df_index, "Generated Subject"] = ""
         df.loc[original_df_index, "Generated Body"] = ""
         save_data()
-        log_messages.append(f"Email for {df.loc[original_df_index, 'Company']} discarded.")
+        logging.info(f"Email for {df.loc[original_df_index, 'Company']} discarded.")
+        return get_pending_review_emails(), "", "", f"Email for {df.loc[original_df_index, 'Company']} discarded."
     except Exception as e:
-        log_messages.append(f"Error discarding email: {e}")
-    
-    return get_pending_review_emails(), "", "", "\n".join(log_messages)
+        logging.error(f"Error discarding email: {e}")
+        return get_pending_review_emails(), "", "", f"Error discarding email: {e}"
 
 # --- Gradio UI Definition ---
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
@@ -401,14 +405,49 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     # --- FIX: Correct way to load initial data for multiple dataframes ---
     def _preload_data_on_startup():
-        global RESUME_CACHE
-        print("Pre-loading resume data...")
+        global RESUME_CACHE, GMAIL_SERVICE, SHEETS_SERVICE
+
+        # Configure logging
+        log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s')
+        
+        # Console Handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(log_formatter)
+        
+        # File Handler (Rotating)
+        log_file = "bot_activity.log"
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=1024 * 1024 * 5,  # 5 MB
+            backupCount=5
+        )
+        file_handler.setFormatter(log_formatter)
+        
+        # Get root logger and add handlers
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO) # Set default logging level
+        root_logger.addHandler(console_handler)
+        root_logger.addHandler(file_handler)
+
+        logging.info("Application startup: Pre-loading data and checking services.")
+
+        logging.info("Pre-loading resume data...")
         try:
             RESUME_CACHE["AI/ML"] = load_resume_text(config.AI_ML_RESUME)
             RESUME_CACHE["Fullstack"] = load_resume_text(config.FULLSTACK_RESUME)
-            print("Resume data pre-loaded successfully.")
+            logging.info("Resume data pre-loaded successfully.")
         except Exception as e:
-            print(f"Error pre-loading resume data: {e}")
+            logging.error(f"Error pre-loading resume data: {e}")
+
+        # Attempt to get Gmail service to trigger authentication if needed before server starts
+        logging.info("Checking Google services authentication...")
+        try:
+            GMAIL_SERVICE = get_gmail_service()
+            SHEETS_SERVICE = get_sheets_service()
+            logging.info("Google services authentication successful.")
+        except Exception as e:
+            logging.error(f"Could not complete Google services authentication on startup: {e}")
+            logging.warning("The app will continue, but email and sheets functions will fail until auth is resolved.")
         
         # Also load initial dataframe data for the UI
         initial_df = load_data()

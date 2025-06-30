@@ -6,6 +6,10 @@ import json
 from datetime import datetime
 import config
 from .templates import EMAIL_TEMPLATES, FOLLOWUP_TEMPLATES, SIGNATURE
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-2.0-flash-lite"
 AI_ML_RESUME_PATH = config.AI_ML_RESUME
@@ -14,13 +18,9 @@ gem_key=config.GEMINI_API_KEY
 
 
 try:
-   
-
     genai.configure(api_key=gem_key)
- 
-  
 except Exception as e:
-    print(f"Error configuring Gemini API: {e}")
+    logger.error(f"Error configuring Gemini API: {e}")
 
 # --- Key Achievements Arsenal ---
 KEY_ACHIEVEMENTS = [
@@ -41,7 +41,7 @@ def load_resume_text(resume_path: str) -> str:
                 text += page.extract_text() or ""
             return text
     except Exception as e:
-        print(f"Error loading resume from {resume_path}: {e}")
+        logger.error(f"Error loading resume from {resume_path}: {e}")
         return ""
 
 def analyze_and_choose_resume(tavily_results: str, recruiter_title: str) -> str:
@@ -64,11 +64,13 @@ def analyze_and_choose_resume(tavily_results: str, recruiter_title: str) -> str:
     try:
         response = model.generate_content(prompt)
         choice = response.text.strip()
+        logger.info(f"AI chose resume type: {choice} for recruiter title: {recruiter_title}.")
         if choice in ["AI/ML", "Fullstack"]:
             return choice
+        logger.warning(f"Unexpected resume choice from AI: {choice}. Defaulting to Fullstack.")
         return "Fullstack" # Default if the response is unexpected
     except Exception as e:
-        print(f"Gemini error during resume analysis: {e}")
+        logger.error(f"Gemini error during resume analysis: {e}")
         return "Fullstack" # Default on error
 
 def extract_company_insights(tavily_results: str) -> dict:
@@ -94,19 +96,9 @@ def extract_company_insights(tavily_results: str) -> dict:
         cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
         return json.loads(cleaned_response)
     except Exception as e:
-        print(f"Error extracting company insights: {e}")
-        print(f"Raw AI response for company insights: {response.text.strip() if 'response' in locals() else 'No response'}")
+        logger.error(f"Error extracting company insights: {e}")
+        logger.error(f"Raw AI response for company insights: {response.text.strip() if 'response' in locals() else 'No response'}")
         return {}
-
-def determine_graduation_timeline() -> str:
-    """Determine urgency based on current date and graduation timeline"""
-    current_month = datetime.now().month
-    if current_month >= 4 and current_month <= 6:
-        return "May 2025"  # Final semester
-    elif current_month >= 10 and current_month <= 12:
-        return "December 2025"  # Mid-year graduation
-    else:
-        return "upcoming semester"
 
 def determine_graduation_timeline() -> str:
     """Determine urgency based on current date and graduation timeline"""
@@ -147,7 +139,7 @@ def extract_sender_details_from_resume(resume_text: str) -> dict:
         cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
         return json.loads(cleaned_response)
     except Exception as e:
-        print(f"Error extracting sender details from resume: {e}")
+        logger.error(f"Error extracting sender details from resume: {e}")
         return {"degree": "", "key_skills": "", "project_experience": "", "name": ""}
 
 def extract_achievement_keywords(resume_data: str) -> list:
@@ -172,8 +164,8 @@ def extract_achievement_keywords(resume_data: str) -> list:
         import ast
         return ast.literal_eval(cleaned_response)
     except Exception as e:
-        print(f"Error extracting achievement keywords: {e}")
-        print(f"Raw AI response for achievement keywords: {response.text.strip() if 'response' in locals() else 'No response'}")
+        logger.error(f"Error extracting achievement keywords: {e}")
+        logger.error(f"Raw AI response for achievement keywords: {response.text.strip() if 'response' in locals() else 'No response'}")
         return ["Built scalable AI systems", "Achieved significant performance gains"]
 
 def get_best_performing_template() -> str:
@@ -192,95 +184,156 @@ def get_best_performing_template() -> str:
         
         return best_template
     except Exception as e:
-        print(f"Error getting best performing template: {e}")
+        logger.error(f"Error getting best performing template: {e}")
         return "project_showcase"
 
-def choose_initial_template(tavily_results: str, role_applied_for: str) -> str:
+def choose_initial_template(tavily_results: str, role_type: str) -> str:
     """
-    Uses Gemini to select the best initial outreach template.
+    Uses Gemini to select the best initial outreach template based on role and research.
     """
     model = genai.GenerativeModel(MODEL_NAME)
     
-    # Describes the purpose of each template for the AI
-    template_descriptions = """
-    - `project_showcase`: Lead with your single most impressive project result.
-    - `skill_to_problem_match`: Directly map one of your skills to a problem the company likely has.
-    - `brutally_direct_proof`: A short, brutally direct email that uses a stat as the hook.
+    # Define the purpose of each template style for the AI
+    template_style_descriptions = """
+    - `quick_question`: A polite and direct inquiry, best for general outreach or when the company's specific needs are unknown.
+    - `metric_driven`: Leads with a specific, quantifiable achievement. Ideal for companies that appear data-driven or results-oriented.
+    - `story`: Uses a narrative to showcase problem-solving and adaptability. Good for companies with a strong culture or brand story.
+    - `curiosity`: Poses a question to spark interest and frame a problem. Best for innovative companies or when you can offer a unique perspective.
+    - `direct_bullets`: A concise, scannable summary of achievements. Perfect for busy recruiters or very formal corporate environments.
     """
 
-    # Dynamically adjust the prompt based on whether a specific role is provided
-    if role_applied_for:
-        context_prompt = f"The user is applying for a specific role: '{role_applied_for}'."
-    else:
-        context_prompt = "The user is making a general inquiry about potential opportunities, not applying for a specific listed role."
+    # Dynamically select the list of templates based on the role
+    if role_type == "AI/ML":
+        available_templates = [key for key in EMAIL_TEMPLATES.keys() if key.startswith('ai_')]
+        role_context = "The user is applying for an AI/ML or Data Science role."
+    else: # Default to Fullstack
+        available_templates = [key for key in EMAIL_TEMPLATES.keys() if key.startswith('fullstack_')]
+        role_context = "The user is applying for a Fullstack or Frontend developer role."
 
     prompt = f"""
     You are an expert career strategist. Your task is to select the single best email template for a job-seeking fresher.
 
-    **Context:** {context_prompt}
+    **Context:** {role_context}
 
     **Company Research from Tavily:**
     {tavily_results}
 
-    **Available Templates and Their Purpose:**
-    {template_descriptions}
+    **Available Template Styles and Their Purpose:**
+    {template_style_descriptions}
 
-    Analyze all the information and choose the most appropriate template name from the list. Your response MUST be ONLY a single template name.
+    **List of Available Template Names for this Role:**
+    {available_templates}
+
+    Analyze all the information. Based on the company research, choose the most appropriate template NAME from the list provided. Your response MUST be ONLY the single template name you choose.
     """
     try:
         response = model.generate_content(prompt)
         choice = response.text.strip()
-        if choice in EMAIL_TEMPLATES.keys():
+        logger.info(f"AI chose initial template: {choice} for role type: {role_type}.")
+        if choice in available_templates:
             return choice
-        # Fallback logic
-        return "skill_to_problem_match" if role_applied_for else "project_showcase"
+        logger.warning(f"Unexpected template choice from AI: {choice}. Defaulting to {available_templates[0]}.")
+        # Fallback logic: return the first available template for the role
+        return available_templates[0]
     except Exception as e:
-        print(f"Gemini error during template selection: {e}")
-        return "general_startup"
+        logger.error(f"Gemini error during template selection: {e}")
+        return available_templates[0] # Default on error
 
-
-
-def validate_email_quality(email_content: str, resume_data: str) -> dict:
-    """Comprehensive email quality validation"""
+def populate_template(template_type: str, template_name: str, tavily_results: str, recipient_data: dict, sender_data: dict, resume_text: str) -> tuple[str, str]:
+    """
+    Uses Gemini to fill in template placeholders, including dynamic metrics.
+    """
     model = genai.GenerativeModel(MODEL_NAME)
-    
+
+    if template_type == 'initial':
+        template_text = EMAIL_TEMPLATES.get(template_name)
+    elif template_type == 'followup':
+        template_text = FOLLOWUP_TEMPLATES.get(template_name)
+    else:
+        raise ValueError("Invalid template_type specified.")
+
+    # Format the structured insights into a clean string for the prompt
+    tavily_research_summary = (
+        f"1. Recent News: {tavily_results.get('recent_news')}\n"
+        f"2. Tech Stack: {tavily_results.get('tech_stack')}\n"
+        f"3. Mission & Values: {tavily_results.get('mission_and_values')}"
+    )
+
+    if template_name == "value_add_followup":
+        tavily_research_summary += f"\n4. Recent Company Updates (for value-add follow-up): {tavily_results.get('recent_news_for_followup', 'No specific recent updates found.')}"
+
     prompt = f"""
-    Evaluate this cold email for a fresh graduate and provide quality scores:
+    You are a master copywriter. Your task is to take a template and fill its placeholders to create a compelling cold email.
+
+    **My Personal Details (from resume):**
+    - My Name: {sender_data.get('name')}
+    - My Degree: {sender_data.get('degree')}
+    - My Key Skills: {sender_data.get('key_skills')}
+    - Relevant Project Experience Summary: {sender_data.get('project_experience')}
+    - Graduation Timeline: {determine_graduation_timeline()}
+
+    **Company Research (for context):**
+    {tavily_research_summary}
     
-    **EMAIL:**
-    {email_content}
-    
-    **RESUME CONTEXT:**
-    {resume_data}
-    
-    Rate each aspect from 1-10 and provide feedback:
-    
-    1. **Personalization Level**: How specific and tailored is this email?
-    2. **Fresher Positioning**: How well does it position the candidate as a strong fresh graduate?
-    3. **Technical Credibility**: How effectively does it demonstrate technical skills?
-    4. **Business Value**: How clearly does it connect skills to business impact?
-    5. **Professionalism**: How professional and polished is the writing?
-    6. **Call-to-Action**: How clear and compelling is the next step?
-    7. **Length Appropriateness**: Is it concise yet comprehensive? (ideal: 75-125 words)
-    
-    Return as JSON:
+    **My Full Resume Text (for deep analysis):**
+    {resume_text}
+
+    **Email Template to Populate:**
+    ---
+    {template_text}
+    ---
+
+    **CRITICAL INSTRUCTIONS:**
+    1.  **Fill Placeholders:** Creatively fill in all placeholders like `{{company_name}}`, `{{role_type}}`, etc.
+    2.  **Dynamic Metrics:** The template may contain a `{{metric}}` placeholder. Analyze my resume and project experience to find the most relevant and impressive number or statistic for that specific template. Replace `{{metric}}` with that number (e.g., replace '{{metric}}%' with '40%').
+    3.  **Salutation:** For the greeting, you MUST use the exact placeholder `{{recipient_name_placeholder}}`. Do NOT use the actual recipient's name.
+    4.  **HTML Formatting:** The final email body must be formatted with simple HTML (`<p>`, `<br>`, `<ul>`, `<li>`, `<b>`). Every new line MUST be an HTML tag.
+    5.  **JSON Output:** Your entire response MUST be a single, valid JSON object with "subject" and "body" keys. The body should NOT include my signature.
+
+    **Example JSON Output:**
     {{
-        "scores": {{"personalization": 8, "fresher_positioning": 7, ...}},
-        "overall_score": 7.8,
-        "feedback": "Specific improvement suggestions",
-        "strengths": ["What works well"],
-        "improvements": ["What to fix"]
+      "subject": "Boosted web app performance by 30% — idea for {recipient_data.get('Company')}",
+      "body": "<p>Hello {{recipient_name_placeholder}},</p><p>I’m Ashish, a full-stack developer (React/Node) and recent IT graduate...</p>"
     }}
     """
-    
     try:
         response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
-        return json.loads(cleaned_response)
+        cleaned_json_string = response.text.strip().replace('```json', '').replace('```', '').strip()
+        email_data = json.loads(cleaned_json_string)
+        
+        subject = email_data.get("subject", f"Inquiry regarding {recipient_data.get('Company')}")
+        body = email_data.get("body", "Hello {{recipient_name_placeholder}},\n\nCould not generate email content.")
+        
+        # Return the raw body with the placeholder. DO NOT add the signature here.
+        return subject, body
+        
+    except (Exception, json.JSONDecodeError) as e:
+        logger.error(f"Gemini error or JSON parsing failed during template population: {e}")
+        subject = f"Inquiry regarding opportunities at {recipient_data.get('Company')}"
+        body = f"<p>Dear {{recipient_name_placeholder}},</p><p>I am writing to express my strong interest in potential roles at your company.</p>"
+        return subject, body
+
+def is_email_safe_to_send(email_subject: str, email_body: str, role_type: str, company_name: str) -> str:
+    """Uses Gemini to act as a quality guardrail, checking for relevance and critical errors."""
+    model = genai.GenerativeModel(MODEL_NAME)
+    prompt = f"""
+    You are a Quality Assurance agent. The user is a '{role_type}' graduate applying to '{company_name}'.
+
+    Analyze the following email subject and body. Does this email contain any highly irrelevant topics,
+    such as asking for a role in HR, marketing, sales, or any other field that is completely unrelated to the user's profile?
+    Does it mention goals or technologies that are nonsensical for a tech applicant?
+
+    Email Subject: {email_subject}
+    Email Body: {email_body}
+
+    Your entire response MUST be a single word: 'APPROVE' or 'REJECT'.
+    """
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip().upper()
     except Exception as e:
-        print(f"Error validating email quality: {e}")
-        print(f"Raw AI response for email quality: {response.text.strip() if 'response' in locals() else 'No response'}")
-        return {"overall_score": 0, "feedback": "Could not validate email quality"}
+        logger.error(f"Error during email safety check: {e}")
+        return "REJECT" # Default to reject on error for safety
 
 def track_email_performance(
     template_name: str, 
@@ -330,127 +383,7 @@ def track_email_performance(
     with open('email_performance.json', 'w') as f:
         json.dump(data, f, indent=2)
     
-    print(f"Performance tracked: {template_name} - {'✓' if response_received else '✗'}")
-
-def choose_optimal_template(tavily_results: str, recipient_info: dict, performance_data: dict = None) -> str:
-    """Choose template based on context and performance data"""
-    
-    # Get performance-based recommendation
-    best_performing = get_best_performing_template() if performance_data else "project_showcase"
-    
-    # Get context-based recommendation  
-    context_based = choose_initial_template(tavily_results, recipient_info)
-    
-    # If performance data is strong, weight it heavily
-    if performance_data and performance_data.get(best_performing, {}).get("sent", 0) >= 10:
-        return best_performing
-    else:
-        return context_based
-
-def populate_template(template_type: str, template_name: str, tavily_results: str, recipient_data: dict, sender_data: dict, resume_text: str) -> tuple[str, str]:
-    """
-    Uses Gemini to fill in template placeholders. It is explicitly told to use a placeholder
-    for the recipient's name, which will be replaced later.
-    """
-    model = genai.GenerativeModel(MODEL_NAME)
-
-    if template_type == 'initial':
-        template_text = EMAIL_TEMPLATES.get(template_name, EMAIL_TEMPLATES['project_showcase'])
-    elif template_type == 'followup':
-        template_text = FOLLOWUP_TEMPLATES.get(template_name, FOLLOWUP_TEMPLATES['first_followup'])
-    else:
-        raise ValueError("Invalid template_type specified.")
-
-    # Format the structured insights into a clean string for the prompt
-    tavily_research_summary = (
-        f"1. Recent News: {tavily_results.get('recent_news')}\n"
-        f"2. Tech Stack: {tavily_results.get('tech_stack')}\n"
-        f"3. Mission & Values: {tavily_results.get('mission_and_values')}"
-    )
-
-    if template_name == "value_add_followup":
-        tavily_research_summary += f"\n4. Recent Company Updates (for value-add follow-up): {tavily_results.get('recent_news_for_followup', 'No specific recent updates found.')}"
-
-    prompt = f"""
-    You are a master copywriter specializing in professional emails. Your task is to take a template and fill its placeholders to create a compelling cold email.
-
-    **Company and Role Data:**
-    - Company Name: {recipient_data.get('Company')}
-    - Specific Role (if any): {recipient_data.get('Title')}
-
-    **My Personal Details:**
-    - My Name: {sender_data.get('name')}
-    - My Degree: {sender_data.get('degree')}
-    - My Key Skills: {sender_data.get('key_skills')}
-    - Relevant Project Experience: {sender_data.get('project_experience')}
-    - Graduation Timeline: {determine_graduation_timeline()}
-
-    **Company Research from Tavily (for context):**
-    {tavily_research_summary}
-
-    **My Resume Text (for deep analysis):
-    {resume_text}
-
-    **Email Template to Populate:**
-    ---
-    {template_text}
-    ---
-
-    **CRITICAL INSTRUCTIONS:**
-    1.  You are a career strategist. Your primary source of truth for the candidate's skills is the provided resume text. Analyze it deeply and extract the most relevant project, skill, or achievement that aligns with the target company's profile. Use this insight to write the email.
-    2.  For the salutation (e.g., "Dear..."), you MUST use the exact placeholder `{{recipient_name_placeholder}}`. Do NOT use the actual recipient's name. For example, write "Dear {{recipient_name_placeholder}},"
-    3.  Creatively fill in all other placeholders (e.g., `{{company_mission}}`).
-    4.  The final email body must be formatted with simple HTML (`<p>` and `<br>`).
-    5.  Your entire response MUST be a single, valid JSON object with two keys: "subject" and "body". The body should NOT include my signature.
-    6.  If this is a follow-up email (template_type is 'followup'), briefly reference a specific point from the initial research (e.g., {tavily_results.get('recent_news')} or {tavily_results.get('mission_and_values')}) to remind the recipient why you are interested. Do not repeat the entire first email.
-    7.  If the template is `value_add_followup`, incorporate the `Recent Company Updates` from the Tavily research into the email to provide new, relevant information.
-    8. CRITICAL: Every new line or paragraph break MUST be an HTML tag (<br> or <p>). Do not use \n.
-
-
-    **Example JSON Output:**
-    {{
-      "subject": "Interest in AI/ML Opportunities at {recipient_data.get('Company')}",
-      "body": "<p>Dear {{recipient_name_placeholder}},</p><p>I was impressed to learn about {recipient_data.get('Company')}'s recent launch of...</p>"
-    }}
-    """
-    try:
-        response = model.generate_content(prompt)
-        cleaned_json_string = response.text.strip().replace('```json', '').replace('```', '').strip()
-        email_data = json.loads(cleaned_json_string)
-        
-        subject = email_data.get("subject", f"Inquiry regarding {recipient_data.get('Company')}")
-        body = email_data.get("body", "Hello {{recipient_name_placeholder}},\n\nCould not generate email content.")
-        
-        # Return the raw body with the placeholder. DO NOT add the signature here.
-        return subject, body
-        
-    except (Exception, json.JSONDecodeError) as e:
-        print(f"Gemini error or JSON parsing failed: {e}")
-        subject = f"Inquiry regarding opportunities at {recipient_data.get('Company')}"
-        body = f"<p>Dear {{recipient_name_placeholder}},</p><p>I am writing to express my strong interest in potential roles at your company.</p>"
-        return subject, body
-
-def is_email_safe_to_send(email_subject: str, email_body: str, role_type: str, company_name: str) -> str:
-    """Uses Gemini to act as a quality guardrail, checking for relevance and critical errors."""
-    model = genai.GenerativeModel(MODEL_NAME)
-    prompt = f"""
-    You are a Quality Assurance agent. The user is a '{role_type}' graduate applying to '{company_name}'.
-
-    Analyze the following email subject and body. Does this email contain any highly irrelevant topics,
-    such as asking for a role in HR, marketing, sales, or any other field that is completely unrelated to the user's profile?
-    Does it mention goals or technologies that are nonsensical for a tech applicant?
-
-    Email Subject: {email_subject}
-    Email Body: {email_body}
-
-    Your entire response MUST be a single word: 'APPROVE' or 'REJECT'.
-    """
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip().upper()
-    except Exception as e:
-        print(f"Error during email safety check: {e}")
-        return "REJECT" # Default to reject on error for safety
+    logging.info(f"Performance tracked: {template_name} - {'✓' if response_received else '✗'}")
 
 def generate_fresher_email(
     tavily_results: str,
@@ -464,17 +397,19 @@ def generate_fresher_email(
     Complete fresher-optimized email generation pipeline.
     This function now handles the final name replacement and signature attachment.
     """
-    print(" Starting fresher-optimized email generation...")
+    logger.info("Starting fresher-optimized email generation...")
     
     # 1. Determine which resume type was chosen (for tracking/reporting)
     resume_choice = analyze_and_choose_resume(tavily_results, recipient_title)
     
     if not resume_text:
+        logger.error("Resume text not provided to generate_fresher_email.")
         return {"error": "Resume text not provided."}
     
     # Extract sender details directly from the resume
     sender_details = extract_sender_details_from_resume(resume_text)
     if not sender_details["name"] or not sender_details["degree"]:
+        logger.error("Could not extract essential sender details from resume.")
         return {"error": "Could not extract essential sender details from resume."}
 
     # 2. Choose optimal template
@@ -510,9 +445,62 @@ def generate_fresher_email(
     # 6. Run the pre-send quality guardrail
     safety_check_result = is_email_safe_to_send(subject_line, final_email_body, role_type, company_name)
     if safety_check_result == "REJECT":
-        print(f"[GUARDRAIL REJECTED]: Email for {company_name} was deemed irrelevant and has been blocked.")
+        logger.warning(f"[GUARDRAIL REJECTED]: Email for {company_name} was deemed irrelevant and has been blocked.")
     else:
-        print("Failsafe check passed.")
+        logger.info("Failsafe check passed.")
+
+    def validate_email_quality(email_content: str, resume_text: str) -> dict:
+        """Uses Gemini to evaluate the quality of the generated email against the resume."""
+        model = genai.GenerativeModel(MODEL_NAME)
+        prompt = f"""
+        You are an expert email quality assurance specialist. Your task is to evaluate the following cold email
+        against the provided resume to ensure it is highly personalized, relevant, and compelling for a job application.
+    
+        **Email Content:**
+        {email_content}
+    
+        **Candidate's Resume Text:**
+        {resume_text}
+    
+        **Evaluation Criteria:**
+        1.  **Relevance (0-10):** How well does the email align with the candidate's skills and experience as presented in the resume?
+        2.  **Personalization (0-10):** How well does the email incorporate specific details from the resume or imply research into the candidate's background? (e.g., mentioning specific projects, skills, or achievements from the resume).
+        3.  **Clarity & Conciseness (0-10):** Is the email easy to read, to the point, and free of jargon?
+        4.  **Call to Action (0-10):** Is there a clear, polite, and effective call to action?
+        5.  **Overall Impact (0-10):** How likely is this email to get a positive response based on its quality and personalization?
+    
+        Provide a JSON object with the following structure:
+        -   `overall_score`: An integer from 0-10 (average of the above scores).
+        -   `strengths`: A list of bullet points highlighting what the email does well.
+        -   `improvements`: A list of bullet points suggesting specific ways to improve the email.
+        -   `reasoning`: A brief paragraph explaining the overall score and key observations.
+    
+        Example JSON Output:
+        {{
+          "overall_score": 8,
+          "strengths": [
+            "Clearly highlights relevant project experience.",
+            "Good personalization by mentioning specific skills."
+          ],
+          "improvements": [
+            "Could include a more direct call to action.",
+            "Subject line could be more engaging."
+          ],
+          "reasoning": "The email is well-structured and personalized, effectively showcasing the candidate's relevant experience. A stronger call to action would further enhance its effectiveness."
+        }}
+        """
+        try:
+            response = model.generate_content(prompt)
+            cleaned_json_string = response.text.strip().replace('```json', '').replace('```', '').strip()
+            return json.loads(cleaned_json_string)
+        except Exception as e:
+            logger.error(f"Error validating email quality: {e}")
+            return {
+                "overall_score": 5,
+                "strengths": ["Basic email structure is present."],
+                "improvements": ["Failed to run quality check. Manual review needed."],
+                "reasoning": "An error occurred during the AI quality validation process."
+            }
 
     # 7. Validate quality
     quality_report = validate_email_quality(f"Subject: {subject_line}\n\n{final_email_body}", resume_text)

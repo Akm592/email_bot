@@ -1,10 +1,14 @@
 # src/tavily_search.py
 
+import logging
+
 from tavily import TavilyClient
 import config
 import json
 import os
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 TAVILY_API_KEY = config.TAVILY_API_KEY
 CACHE_FILE = "data/tavily_cache.json"
@@ -33,10 +37,10 @@ def get_structured_company_insights(company_name: str) -> dict:
         entry = cache[company_name]
         entry_time = datetime.fromisoformat(entry['timestamp'])
         if datetime.utcnow() - entry_time < timedelta(hours=CACHE_DURATION_HOURS):
-            print(f"CACHE HIT: Using structured cached results for {company_name}.")
+            logger.info(f"CACHE HIT: Using structured cached results for {company_name}.")
             return entry['results']
             
-    print(f"CACHE MISS: Performing new structured search for {company_name}.")
+    logger.info(f"CACHE MISS: Performing new structured search for {company_name}.")
     
     insights = {
         "recent_news": "No information found.",
@@ -74,7 +78,7 @@ def get_structured_company_insights(company_name: str) -> dict:
         return insights
 
     except Exception as e:
-        print(f"Error during structured Tavily search for {company_name}: {e}")
+        logger.error(f"Error during structured Tavily search for {company_name}: {e}")
         return insights # Return the default dictionary on error
 
 # Keep the old function name for compatibility, but have it call the new one

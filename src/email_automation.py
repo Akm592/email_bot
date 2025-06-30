@@ -5,18 +5,20 @@ import os
 import json
 import logging
 
+import logging
+
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, check_for_replies, clean_email_address
 from src.email_generator import populate_template, extract_sender_details_from_resume
 from src.tavily_search import search_company_background
 from .templates import FOLLOWUP_TEMPLATES
 import config
 
-def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
-    log_messages = []
-    gmail_service = get_gmail_service()
+def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):
     if not gmail_service:
-        log_messages.append("Failed to obtain Gmail service. Cannot proceed.")
-        return df, "\n".join(log_messages)
+        logging.error("Failed to obtain Gmail service. Cannot proceed with follow-ups.")
+        return df, "Failed to obtain Gmail service. Cannot proceed with follow-ups."
+
+    logging.info("Starting check and follow-up cycle.")
 
     for index, row in df.iterrows():
         # --- REPLY CHECKING LOGIC (Remains the same, it's already excellent) ---
@@ -28,10 +30,10 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
             email_body, classification = check_for_replies(gmail_service, "me", recipient_email)
             if email_body:
                 df.loc[index, "Response Status"] = f"Replied ({classification})"
-                log_messages.append(f"Reply from {recipient_email} classified as '{classification}'.")
+                logging.info(f"Reply from {recipient_email} classified as '{classification}'.")
                 # Immediately stop if a human replied
                 if classification == "human":
-                    log_messages.append(f"-> Sequence HALTED for {recipient_email}.")
+                    logging.info(f"-> Sequence HALTED for {recipient_email}.")
                     continue # Move to the next person
 
         # --- RESTRUCTURED AND FIXED FOLLOW-UP LOGIC ---
@@ -44,7 +46,7 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
             role_type = row["Resume Type"]
             resume_text = resume_cache.get(role_type)
             if not resume_text:
-                log_messages.append(f"-> Resume text for {role_type} not found. Skipping follow-up for {recipient_email}.")
+                logging.warning(f"-> Resume text for {role_type} not found. Skipping follow-up for {recipient_email}.")
                 continue
             
             # Dynamically parse sender details from the correct resume
@@ -62,22 +64,22 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
             # --- Stage 1: First Follow-up ---
             if pd.isna(row["Follow-up 1 Date"]):
                 if (today - sent_date).days >= config.FOLLOWUP_1_DAYS:
-                    log_messages.append(f"-> Sending Follow-up #1 to {recipient_email}...")
+                    logging.info(f"-> Sending Follow-up #1 to {recipient_email}...")
                     subject, body = populate_template('followup', "first_followup", tavily_results, recipient_data, sender_data, resume_text)
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
                     if send_message(gmail_service, "me", message):
                         df.loc[index, "Follow-up 1 Date"] = today.strftime("%Y-%m-%d")
-                        log_messages.append(f"--> Follow-up #1 sent successfully.")
+                        logging.info(f"--> Follow-up #1 sent successfully.")
                         time.sleep(10)
                     else:
-                        log_messages.append(f"--> FAILED to send Follow-up #1.")
+                        logging.error(f"--> FAILED to send Follow-up #1.")
                 continue # Process one follow-up per run for a given contact
 
             # --- Stage 2: Second Follow-up (Value-Add) ---
             if pd.notna(row["Follow-up 1 Date"]) and pd.isna(row["Follow-up 2 Date"]):
                 follow_up_1_date = datetime.strptime(row["Follow-up 1 Date"], "%Y-%m-%d")
                 if (today - follow_up_1_date).days >= config.FOLLOWUP_2_DAYS_AFTER_1:
-                    log_messages.append(f"-> Sending Follow-up #2 (Value-Add) to {recipient_email}...")
+                    logging.info(f"-> Sending Follow-up #2 (Value-Add) to {recipient_email}...")
                     
                     # Add new, fresh insight for this specific follow-up
                     tavily_results['recent_news_for_followup'] = search_company_background(f"Recent news from {row['Company']} in the last 7 days").get('recent_news')
@@ -86,25 +88,26 @@ def check_and_follow_up(df: pd.DataFrame, resume_cache: dict):
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
                     if send_message(gmail_service, "me", message):
                         df.loc[index, "Follow-up 2 Date"] = today.strftime("%Y-%m-%d")
-                        log_messages.append(f"--> Follow-up #2 sent successfully.")
+                        logging.info(f"--> Follow-up #2 sent successfully.")
                         time.sleep(10)
                     else:
-                        log_messages.append(f"--> FAILED to send Follow-up #2.")
+                        logging.error(f"--> FAILED to send Follow-up #2.")
                 continue
 
             # --- Stage 3: Third Follow-up (Closing Loop) ---
             if pd.notna(row["Follow-up 2 Date"]) and pd.isna(row["Follow-up 3 Date"]):
                 follow_up_2_date = datetime.strptime(row["Follow-up 2 Date"], "%Y-%m-%d")
                 if (today - follow_up_2_date).days >= config.FOLLOWUP_3_DAYS_AFTER_2:
-                    log_messages.append(f"-> Sending Follow-up #3 (Closing Loop) to {recipient_email}...")
+                    logging.info(f"-> Sending Follow-up #3 (Closing Loop) to {recipient_email}...")
                     subject, body = populate_template('followup', "final_followup", tavily_results, recipient_data, sender_data, resume_text)
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
                     if send_message(gmail_service, "me", message):
                         df.loc[index, "Follow-up 3 Date"] = today.strftime("%Y-%m-%d")
-                        log_messages.append(f"--> Follow-up #3 sent successfully.")
+                        logging.info(f"--> Follow-up #3 sent successfully.")
                         time.sleep(10)
                     else:
-                        log_messages.append(f"--> FAILED to send Follow-up #3.")
+                        logging.error(f"--> FAILED to send Follow-up #3.")
                 continue
 
-    return df, "\n".join(log_messages)
+    logging.info("Check and follow-up cycle complete.")
+    return df, "Check and follow-up cycle complete."

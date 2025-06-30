@@ -1,3 +1,5 @@
+import logging
+
 # --- FIXED GMAIL UTILS ---
 import os.path
 import base64
@@ -16,12 +18,14 @@ import quopri
 import google.generativeai as genai
 import config
 
+logger = logging.getLogger(__name__)
+
 SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.modify']
 
 try:
     genai.configure(api_key=config.GEMINI_API_KEY)
 except Exception as e:
-    print(f"Error configuring Gemini API in gmail_api: {e}")
+    logger.error(f"Error configuring Gemini API in gmail_api: {e}")
 
 def clean_email_address(email):
     email = str(email).strip()
@@ -42,21 +46,27 @@ def clean_email_address(email):
 
 def get_gmail_service():
     creds = None
+    logger.info("Attempting to get Gmail service.")
     if os.path.exists('token.json'):
         try:
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         except ValueError:
+            logger.warning("Invalid token.json found, re-authenticating.")
             creds = None  # Invalid token, proceed to re-authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            logger.info("Refreshing Gmail API credentials.")
             creds.refresh(Request())
         else:
             if os.path.exists('token.json'):
                 os.remove('token.json') # Remove invalid token
+                logger.info("Removed invalid token.json.")
+            logger.info("Initiating new Gmail API authentication flow.")
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=8080)
+            creds = flow.run_local_server(port=8080, access_type='offline', prompt='consent')
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
+        logger.info("Gmail API authentication successful, token saved.")
     return build('gmail', 'v1', credentials=creds)
 
 def create_message_with_attachment(sender, to, subject, message_text, file):
@@ -90,15 +100,17 @@ def create_message_with_attachment(sender, to, subject, message_text, file):
     return {'raw': raw_message}
 
 def send_message(service, user_id, message):
+    logger.info(f"Attempting to send email to {message['raw']}. (raw message)")
     for attempt in range(3):
         try:
             sent_msg = service.users().messages().send(userId=user_id, body=message).execute()
-            print(f"Message Id: {sent_msg['id']}")
+            logger.info(f"Message Id: {sent_msg['id']}")
             return sent_msg
         except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
+            logger.warning(f"Attempt {attempt + 1} failed to send email: {e}")
             import time, random
             time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
+    logger.error(f"Failed to send email after 3 attempts to {message['raw']}. (raw message)")
     return None
 
 def classify_email_body(email_body: str) -> str:
@@ -119,7 +131,7 @@ def classify_email_body(email_body: str) -> str:
         else:
             return "other (promotional/spam)"
     except Exception as e:
-        print(f"Error classifying email body with Gemini: {e}")
+        logger.error(f"Error classifying email body with Gemini: {e}")
         return "unknown"
 
 def check_for_replies(service, user_id, from_email):
