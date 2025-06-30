@@ -33,7 +33,9 @@ EXPECTED_COLUMNS = {
     "Follow-up 2 Date": str,
     "Follow-up 3 Date": str,
     "Response Status": str,
-    "Company Info": str
+    "Company Info": str,
+    "Generated Subject": str,
+    "Generated Body": str
 }
 
 # --- Global DataFrame ---
@@ -153,6 +155,7 @@ def start_outreach(input_csv_file, manual_resume_override):
                 email_body = email_generation_result["email_content"]
                 final_resume_type = email_generation_result["resume_choice"]
                 chosen_template_name = email_generation_result["template_used"]
+                safety_check_result = email_generation_result["safety_check_result"]
 
                 log_messages.append(f"-> AI generated email using '{chosen_template_name}' template. Quality Score: {email_generation_result['quality_score']}")
                 
@@ -164,22 +167,29 @@ def start_outreach(input_csv_file, manual_resume_override):
                     response_type=None
                 )
                 
-                resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
+                if safety_check_result == "APPROVE":
+                    resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
 
-                if not os.path.exists(resume_path):
-                    log_messages.append(f"-> Resume not found at {resume_path}. Skipping.")
-                    continue
+                    if not os.path.exists(resume_path):
+                        log_messages.append(f"-> Resume not found at {resume_path}. Skipping.")
+                        continue
 
-                message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, email_subject, email_body, resume_path)
-                if send_message(gmail_service, "me", message):
-                    df.loc[index, "Email Status"] = "Sent"
-                    df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
-                    df.loc[index, "Resume Type"] = final_resume_type
-                    log_messages.append(f"--> Email sent successfully to {recipient_email}.")
-                    save_data()
-                    time.sleep(15) # Increased sleep time for more API calls
-                else:
-                    log_messages.append(f"--> FAILED to send email to {recipient_email}.")
+                    message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, email_subject, email_body, resume_path)
+                    if send_message(gmail_service, "me", message):
+                        df.loc[index, "Email Status"] = "Sent"
+                        df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
+                        df.loc[index, "Resume Type"] = final_resume_type
+                        log_messages.append(f"--> Email sent successfully to {recipient_email}.")
+                        save_data()
+                        time.sleep(15) # Increased sleep time for more API calls
+                    else:
+                        log_messages.append(f"--> FAILED to send email to {recipient_email}.")
+                else: # safety_check_result == "REJECT"
+                    df.loc[index, "Email Status"] = "Pending Review"
+                    df.loc[index, "Generated Subject"] = email_subject
+                    df.loc[index, "Generated Body"] = email_body
+                    log_messages.append(f"[FLAGGED FOR REVIEW]: Email for {company_name} has been flagged and requires manual review.")
+                    save_data() # Save immediately after flagging
             else:
                 log_messages.append(f"--> Failed to get company info from Tavily. Skipping.")
 
@@ -194,6 +204,107 @@ def _check_and_follow_up_wrapper():
     df = updated_df
     save_data()
     return df, log_messages
+
+def get_pending_review_emails():
+    """Filters the global DataFrame to show only emails pending review."""
+    global df
+    return df[df["Email Status"] == "Pending Review"]
+
+def display_for_review(evt: gr.SelectData):
+    """Displays the selected email for review and editing."""
+    global df
+    if evt.index is None:
+        return "", "", get_pending_review_emails(), "No row selected.", None
+    
+    selected_row_index = evt.index[0] # Get the actual index from the original df
+    
+    pending_df = get_pending_review_emails()
+    if selected_row_index >= len(pending_df):
+        return "", "", get_pending_review_emails(), "Invalid row selected.", None
+        
+    original_df_index = pending_df.iloc[selected_row_index].name
+
+    subject = df.loc[original_df_index, "Generated Subject"]
+    body = df.loc[original_df_index, "Generated Body"]
+    company = df.loc[original_df_index, "Company"]
+    recipient = df.loc[original_df_index, "Recipient Name"]
+    
+    log_message = f"Loaded email for {recipient} at {company} (Index: {original_df_index})"
+    return subject, body, get_pending_review_emails(), log_message, original_df_index
+
+def manually_send_email(selected_row_index_str, subject, body):
+    """Sends the manually approved email."""
+    global df
+    log_messages = []
+    
+    if not selected_row_index_str:
+        return get_pending_review_emails(), "", "", "Please select an email to send."
+
+    try:
+        # Convert the string index back to integer
+        selected_row_index = int(selected_row_index_str)
+        
+        pending_df = get_pending_review_emails()
+        if selected_row_index >= len(pending_df):
+            return get_pending_review_emails(), "", "", "Invalid row selected for sending."
+        original_df_index = pending_df.iloc[selected_row_index].name
+
+        row = df.loc[original_df_index]
+        recipient_email = row["Recipient Email"]
+        final_resume_type = row["Resume Type"]
+        company_name = row["Company"]
+
+        gmail_service = get_gmail_service()
+        if not gmail_service:
+            log_messages.append("Failed to obtain Gmail service. Cannot send email.")
+            return get_pending_review_emails(), "", "", "\n".join(log_messages)
+
+        resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
+        if not os.path.exists(resume_path):
+            log_messages.append(f"Resume not found at {resume_path}. Cannot send email.")
+            return get_pending_review_emails(), "", "", "\n".join(log_messages)
+
+        message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
+        if send_message(gmail_service, "me", message):
+            df.loc[original_df_index, "Email Status"] = "Sent (Manual)"
+            df.loc[original_df_index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
+            df.loc[original_df_index, "Generated Subject"] = ""
+            df.loc[original_df_index, "Generated Body"] = ""
+            save_data()
+            log_messages.append(f"Successfully sent manual email to {recipient_email} for {company_name}.")
+        else:
+            log_messages.append(f"FAILED to send manual email to {recipient_email} for {company_name}.")
+
+    except Exception as e:
+        log_messages.append(f"Error sending manual email: {e}")
+    
+    return get_pending_review_emails(), "", "", "\n".join(log_messages)
+
+def discard_email(selected_row_index_str):
+    """Discards the flagged email."""
+    global df
+    log_messages = []
+
+    if not selected_row_index_str:
+        return get_pending_review_emails(), "", "", "Please select an email to discard."
+
+    try:
+        selected_row_index = int(selected_row_index_str)
+        
+        pending_df = get_pending_review_emails()
+        if selected_row_index >= len(pending_df):
+            return get_pending_review_emails(), "", "", "Invalid row selected for discarding."
+        original_df_index = pending_df.iloc[selected_row_index].name
+
+        df.loc[original_df_index, "Email Status"] = "Discarded"
+        df.loc[original_df_index, "Generated Subject"] = ""
+        df.loc[original_df_index, "Generated Body"] = ""
+        save_data()
+        log_messages.append(f"Email for {df.loc[original_df_index, 'Company']} discarded.")
+    except Exception as e:
+        log_messages.append(f"Error discarding email: {e}")
+    
+    return get_pending_review_emails(), "", "", "\n".join(log_messages)
 
 # --- Gradio UI Definition ---
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
@@ -224,6 +335,22 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         monitoring_dataframe = gr.DataFrame(value=load_data(), label="Email Status", interactive=True)
         monitoring_log = gr.Textbox(label="Monitoring Log", lines=10, interactive=False)
 
+    with gr.Tab("Review & Manual Send"):
+        gr.Markdown("### Emails Flagged for Review")
+        review_dataframe = gr.DataFrame(value=pd.DataFrame(columns=list(EXPECTED_COLUMNS.keys())), label="Emails Pending Review", interactive=True)
+        
+        with gr.Column():
+            gr.Markdown("### Review and Edit Email")
+            review_subject = gr.Textbox(label="Email Subject", interactive=True)
+            review_body = gr.Textbox(label="Email Body", interactive=True, lines=20)
+            
+            with gr.Row():
+                approve_send_button = gr.Button("Approve & Send Manually", variant="primary")
+                discard_button = gr.Button("Discard Email")
+            
+            review_log = gr.Textbox(label="Review Log", lines=5, interactive=False)
+            selected_row_original_index_state = gr.State(value=None)
+
     # --- Button Click Handlers ---
     start_button.click(
         start_outreach,
@@ -231,6 +358,8 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         outputs=[output_dataframe, outreach_log]
     ).then(
         load_data, outputs=[monitoring_dataframe] # Update the other tab's view
+    ).then(
+        get_pending_review_emails, outputs=[review_dataframe] # Update the review tab's view
     )
 
     check_followup_button.click(
@@ -239,14 +368,37 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         outputs=[monitoring_dataframe, monitoring_log]
     ).then(
         load_data, outputs=[output_dataframe] # Update the other tab's view
+    ).then(
+        get_pending_review_emails, outputs=[review_dataframe] # Update the review tab's view
     )
 
     sync_sheets_button.click(
         sync_to_google_sheets_gradio,
         inputs=[],
         outputs=[monitoring_log]
+    ).then(
+        get_pending_review_emails, outputs=[review_dataframe] # Update the review tab's view
     )
-    
+
+    # Review & Manual Send Tab Handlers
+    review_dataframe.select(
+        display_for_review,
+        inputs=[review_dataframe],
+        outputs=[review_subject, review_body, review_dataframe, review_log, selected_row_original_index_state]
+    )
+
+    approve_send_button.click(
+        manually_send_email,
+        inputs=[selected_row_original_index_state, review_subject, review_body],
+        outputs=[review_dataframe, review_subject, review_body, review_log]
+    )
+
+    discard_button.click(
+        discard_email,
+        inputs=[selected_row_original_index_state],
+        outputs=[review_dataframe, review_subject, review_body, review_log]
+    )
+
     # --- FIX: Correct way to load initial data for multiple dataframes ---
     def _preload_data_on_startup():
         global RESUME_CACHE
@@ -260,7 +412,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         
         # Also load initial dataframe data for the UI
         initial_df = load_data()
-        return initial_df, initial_df
-    demo.load(_preload_data_on_startup, outputs=[output_dataframe, monitoring_dataframe])
+        return initial_df, initial_df, initial_df[initial_df["Email Status"] == "Pending Review"]
+    demo.load(_preload_data_on_startup, outputs=[output_dataframe, monitoring_dataframe, review_dataframe])
 
 demo.launch()

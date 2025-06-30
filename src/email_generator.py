@@ -511,7 +511,6 @@ def generate_fresher_email(
     safety_check_result = is_email_safe_to_send(subject_line, final_email_body, role_type, company_name)
     if safety_check_result == "REJECT":
         print(f"[GUARDRAIL REJECTED]: Email for {company_name} was deemed irrelevant and has been blocked.")
-        return {"error": "Email rejected by safety guardrail due to irrelevant content."}
     else:
         print("Failsafe check passed.")
 
@@ -526,7 +525,8 @@ def generate_fresher_email(
         "resume_choice": resume_choice,
         "quality_score": quality_report.get("overall_score", 0),
         "recommendations": quality_report.get("improvements", []),
-        "strengths": quality_report.get("strengths", [])
+        "strengths": quality_report.get("strengths", []),
+        "safety_check_result": safety_check_result # Add the safety check result here
     }
     
     print(f"✅ Email generated successfully! Name inserted and signature attached.")

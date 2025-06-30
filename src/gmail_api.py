@@ -16,7 +16,7 @@ import quopri
 import google.generativeai as genai
 import config
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.modify']
 
 try:
     genai.configure(api_key=config.GEMINI_API_KEY)
@@ -43,11 +43,16 @@ def clean_email_address(email):
 def get_gmail_service():
     creds = None
     if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        except ValueError:
+            creds = None  # Invalid token, proceed to re-authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            if os.path.exists('token.json'):
+                os.remove('token.json') # Remove invalid token
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=8080)
         with open('token.json', 'w') as token:
