@@ -67,7 +67,7 @@ def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):
                     logging.info(f"-> Sending Follow-up #1 to {recipient_email}...")
                     subject, body = populate_template('followup', "first_followup", tavily_results, recipient_data, sender_data, resume_text)
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
-                    if send_message(gmail_service, "me", message):
+                    if send_message(gmail_service, "me", message, recipient_email):
                         df.loc[index, "Follow-up 1 Date"] = today.strftime("%Y-%m-%d")
                         logging.info(f"--> Follow-up #1 sent successfully.")
                         time.sleep(10)
@@ -86,7 +86,7 @@ def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):
                     
                     subject, body = populate_template('followup', "value_add_followup", tavily_results, recipient_data, sender_data, resume_text)
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
-                    if send_message(gmail_service, "me", message):
+                    if send_message(gmail_service, "me", message, recipient_email):
                         df.loc[index, "Follow-up 2 Date"] = today.strftime("%Y-%m-%d")
                         logging.info(f"--> Follow-up #2 sent successfully.")
                         time.sleep(10)
@@ -101,7 +101,7 @@ def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):
                     logging.info(f"-> Sending Follow-up #3 (Closing Loop) to {recipient_email}...")
                     subject, body = populate_template('followup', "final_followup", tavily_results, recipient_data, sender_data, resume_text)
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
-                    if send_message(gmail_service, "me", message):
+                    if send_message(gmail_service, "me", message, recipient_email):
                         df.loc[index, "Follow-up 3 Date"] = today.strftime("%Y-%m-%d")
                         logging.info(f"--> Follow-up #3 sent successfully.")
                         time.sleep(10)

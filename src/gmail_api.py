@@ -99,18 +99,19 @@ def create_message_with_attachment(sender, to, subject, message_text, file):
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
     return {'raw': raw_message}
 
-def send_message(service, user_id, message):
-    logger.info(f"Attempting to send email to {message['raw']}. (raw message)")
+def send_message(service, user_id, message, recipient_email):
+    """Sends an email message."""
+    logger.info(f"Attempting to send email to {recipient_email}.")
     for attempt in range(3):
         try:
             sent_msg = service.users().messages().send(userId=user_id, body=message).execute()
-            logger.info(f"Message Id: {sent_msg['id']}")
+            logger.info(f"Message sent to {recipient_email}, Message Id: {sent_msg['id']}")
             return sent_msg
         except Exception as e:
-            logger.warning(f"Attempt {attempt + 1} failed to send email: {e}")
+            logger.warning(f"Attempt {attempt + 1} failed to send email to {recipient_email}: {e}")
             import time, random
             time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
-    logger.error(f"Failed to send email after 3 attempts to {message['raw']}. (raw message)")
+    logger.error(f"Failed to send email after 3 attempts to {recipient_email}.")
     return None
 
 def classify_email_body(email_body: str) -> str:

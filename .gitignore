@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.log
+*.log.1
 venv/
 env/
 .env

@@ -127,7 +127,7 @@ def main():
                     continue
 
                 message = create_message_with_attachment(SENDER_EMAIL, recipient_email, email_body.split('\n')[0].replace('Subject: ', ''), email_body, resume_path) # Extract subject from body
-                if send_message(gmail_service, "me", message):
+                if send_message(gmail_service, "me", message, recipient_email):
                     df.loc[index, "Email Status"] = "Sent"
                     df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d").astype(str)
                     df.loc[index, "Resume Type"] = final_resume_type.astype(str)

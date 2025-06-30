@@ -180,7 +180,7 @@ def start_outreach(input_csv_file, manual_resume_override):
                         continue
 
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, email_subject, email_body, resume_path)
-                    if send_message(GMAIL_SERVICE, "me", message):
+                    if send_message(GMAIL_SERVICE, "me", message, recipient_email):
                         df.loc[index, "Email Status"] = "Sent"
                         df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
                         df.loc[index, "Resume Type"] = final_resume_type
@@ -269,7 +269,7 @@ def manually_send_email(selected_row_index_str, subject, body):
 
         message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, subject, body, resume_path)
         try:
-            if send_message(GMAIL_SERVICE, "me", message):
+            if send_message(GMAIL_SERVICE, "me", message, recipient_email):
                 df.loc[original_df_index, "Email Status"] = "Sent (Manual)"
                 df.loc[original_df_index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
                 df.loc[original_df_index, "Generated Subject"] = ""
