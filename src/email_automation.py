@@ -10,7 +10,6 @@ import logging
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, check_for_replies, clean_email_address
 from src.email_generator import populate_template, extract_sender_details_from_resume
 from src.tavily_search import search_company_background
-from .templates import FOLLOWUP_TEMPLATES
 import config
 
 def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):

@@ -30,6 +30,12 @@ EXPECTED_COLUMNS = {
     "Recipient Name": str,
     "Recipient Email": str,
     "Title": str,
+    # --- NEW COLUMNS ---
+    "Referral Name": str,  # To store the name of the person referring you
+    "Referral Company": str, # To store their company
+    "Chosen Template": str, # To log the exact template used (e.g., "value_proposition")
+    "Template Category": str, # To log the category (e.g., "Value-First")
+    # --- END NEW COLUMNS ---
     "Resume Type": str,
     "Email Status": str,
     "Sent Date": str,
@@ -54,7 +60,7 @@ def load_data():
         df = temp_df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS)
         df["Recipient Email"] = df["Recipient Email"].astype(str).apply(clean_email_address)
     except (FileNotFoundError, KeyError):
-        df = pd.DataFrame(columns=EXPECTED_COLUMNS)
+        df = pd.DataFrame(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS)
     return df
 
 def save_data():
@@ -89,7 +95,17 @@ def start_outreach(input_csv_file, manual_resume_override):
     if input_csv_file is not None:
         try:
             new_contacts_df = pd.read_csv(input_csv_file.name, encoding='utf-8')
-            new_contacts_df = new_contacts_df.rename(columns={"Name": "Recipient Name", "Email": "Recipient Email"})
+            # --- MODIFICATION ---
+            # Standardize column names
+            rename_map = {
+                "Name": "Recipient Name",
+                "Email": "Recipient Email",
+                "Referral_Name": "Referral Name", # Handle different possible input names
+                "Referral": "Referral Name"
+            }
+            new_contacts_df = new_contacts_df.rename(columns=lambda c: rename_map.get(c, c))
+            # --- END MODIFICATION ---
+
             new_contacts_df["Recipient Email"] = new_contacts_df["Recipient Email"].astype(str).apply(clean_email_address)
             new_contacts_df["Email Status"] = "Pending"
             
@@ -104,7 +120,12 @@ def start_outreach(input_csv_file, manual_resume_override):
                 return df, "No new contacts found in the uploaded CSV. All contacts already exist in the system."
 
             # Add only genuinely new contacts
-            df = pd.concat([df, genuinely_new_contacts_df], ignore_index=True).astype(EXPECTED_COLUMNS)
+            df = pd.concat([df, genuinely_new_contacts_df], ignore_index=True)
+            # Fill any missing new columns with empty strings to conform to schema
+            for col in ["Referral Name", "Referral Company", "Chosen Template", "Template Category"]:
+                if col not in df.columns:
+                    df[col] = ""
+            df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS) # Enforce schema
             df.drop_duplicates(subset=["Recipient Email"], keep="last", inplace=True) # Ensure no duplicates after concat
             df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS) # Enforce schema
             save_data()
@@ -142,14 +163,21 @@ def start_outreach(input_csv_file, manual_resume_override):
                     logging.warning(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
                     continue
 
+                # Gather all necessary data from the row
+                referral_name = row.get("Referral Name")
+                referral_company = row.get("Referral Company")
+
+                # ...
                 logging.info("2. Generating personalized email with AI...")
                 email_generation_result = generate_fresher_email(
                     tavily_results=company_info,
                     recipient_name=recipient_name,
                     recipient_title=recruiter_title,
                     company_name=company_name,
-                    role_type=final_resume_type, # Use the AI-chosen resume type
-                    resume_text=resume_text # Pass the pre-loaded resume text
+                    role_type=final_resume_type,
+                    resume_text=resume_text,
+                    referral_name=referral_name,         # Pass the data
+                    referral_company=referral_company  # Pass the data
                 )
 
                 if "error" in email_generation_result:
@@ -162,7 +190,7 @@ def start_outreach(input_csv_file, manual_resume_override):
                 chosen_template_name = email_generation_result["template_used"]
                 safety_check_result = email_generation_result["safety_check_result"]
 
-                logging.info(f"-> AI generated email using '{chosen_template_name}' template. Quality Score: {email_generation_result['quality_score']}")
+                logging.info(f"-> AI generated email using '{chosen_template_name}' template. Performance Tier: {email_generation_result['performance_tier']}")
                 
                 # Track email performance
                 track_email_performance(
@@ -180,13 +208,17 @@ def start_outreach(input_csv_file, manual_resume_override):
                         continue
 
                     message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, email_subject, email_body, resume_path)
+                    # --- UPDATE THE DATA SAVING LOGIC ---
                     if send_message(GMAIL_SERVICE, "me", message, recipient_email):
                         df.loc[index, "Email Status"] = "Sent"
                         df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
                         df.loc[index, "Resume Type"] = final_resume_type
+                        df.loc[index, "Chosen Template"] = email_generation_result.get("template_used", "")
+                        df.loc[index, "Template Category"] = email_generation_result.get("template_category", "")
                         logging.info(f"--> Email sent successfully to {recipient_email}.")
+                        logging.info(f"    Template Used: {df.loc[index, 'Chosen Template']} ({email_generation_result.get('performance_tier')})")
                         save_data()
-                        time.sleep(15) # Increased sleep time for more API calls
+                        time.sleep(15)
                     else:
                         logging.error(f"--> FAILED to send email to {recipient_email}.")
                 else: # safety_check_result == "REJECT"

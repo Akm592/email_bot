@@ -5,7 +5,7 @@ import time
 
 import config
 from src.tavily_search import search_company_background
-from src.email_generator import generate_fresher_email, populate_template, load_resume_text, track_email_performance
+from src.email_generator import generate_fresher_email, populate_template, load_resume_text
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, check_for_replies, clean_email_address
 from src.google_sheets_api import get_sheets_service, write_to_google_sheet
 from src.email_automation import check_and_follow_up

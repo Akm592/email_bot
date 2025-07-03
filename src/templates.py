@@ -1,146 +1,276 @@
-# src/templates.py
+import logging
 
-# This signature block will be appended by the generation function
-SIGNATURE = """
-<br><br>
-Best regards,<br>
-Ashish Kumar Mishra<br><br>
-<b>Phone:</b> 9579690648<br>
-<b>LinkedIn:</b> <a href="https://www.linkedin.com/in/ashishkumarmishra952/">ashishkumarmishra952</a><br>
-<b>Portfolio:</b> <a href="https://www.ashishmishra.site/">ashishmishra.site</a><br>
-<b>GitHub:</b> <a href="https://github.com/Akm592">Akm592</a>
-"""
+logger = logging.getLogger(__name__)
 
-# --- NEW ROLE-SPECIFIC EMAIL TEMPLATES ---
-EMAIL_TEMPLATES = {
-    # --- Fullstack/Frontend Role Templates ---
-    "fullstack_quick_question": """
-Subject: Quick question about {role_type} positions at {company_name}
+TEMPLATES = {
+    "initial": {
+        # Tier 1: Referral (Highest Performance)
+        "referral_introduction": {
+            "subject": "Introduction from {referral_name} regarding {Company}",
+            "body": """Hi {{recipient_name_placeholder}},
 
-<p>Hello {recipient_name},</p>
-<p>My name is Ashish Kumar Mishra, a recent B.Tech IT graduate and passionate full-stack developer. I admire the innovative projects at {company_name}, and I’m interested in any {role_type} opportunities on your team.</p>
-<p>In my recent project CodeQuest101 (an interactive learning platform), I developed a React/D3.js interface that increased user engagement by 40%. I believe I could bring that same dedication and skill set to {company_name}.</p>
-<p>Could you kindly direct me to the person who handles {role_type} hiring, or let me know the best way to apply? I’d be grateful for any guidance or a brief chat about how I can contribute to your team.</p>
-""",
-    "fullstack_metric_driven": """
-Subject: Boosted web app performance by {metric}% — idea for {company_name}
+My name is {sender_name}, and I'm writing to you at the suggestion of {referral_name} from {referral_company}. They mentioned you were the best person to connect with regarding opportunities in {role_type} at {Company}.
 
-<p>Hello {recipient_name},</p>
-<p>I’m Ashish, a full-stack developer (React/Node) and recent IT graduate. For a recent project, Real-Time Chat App, I optimized the MERN stack to support over 1K concurrent users with sub-20ms latency, effectively reducing load times by {metric}%.</p>
-<p>Seeing that {company_name} values high-performance web solutions, I believe this result-driven approach could benefit your team.</p>
-<p>I would love to schedule a brief call to discuss how my experience could drive similar improvements at {company_name}.</p>
-""",
-    "fullstack_story": """
-Subject: How a hackathon challenge led to a {metric}% engagement boost
+Based on my research, {Company} is a leader in [mention specific area from Tavily research], which aligns perfectly with my passion and skills in [mention 1-2 key skills from resume]. I was particularly impressed by [mention a specific project or value of the company].
 
-<p>Hello {recipient_name},</p>
-<p>At a college hackathon, a teammate stepped away from our project, and I volunteered to develop the front end. I built the CodeQuest101 React/D3.js interface from scratch, and our platform saw a {metric}% increase in student engagement. This experience showed me how quickly I can adapt and deliver results under pressure.</p>
-<p>I’m excited about the possibility of bringing this problem-solving mindset to {company_name}'s {role_type} team. Could we set up a short meeting to talk about how my full-stack expertise can contribute to {company_name}? I appreciate your consideration and hope to connect soon.</p>
-""",
-    "fullstack_curiosity": """
-Subject: {recipient_name}, curious how interactive UI can boost engagement?
+I've attached my resume, which details my experience, including a project where I [mention a key achievement, e.g., 'improved data processing efficiency by 20%'].
 
-<p>Hello {recipient_name},</p>
-<p>Have you ever wondered how interactive user interfaces can transform learning experiences? At CodeQuest101, I created a dynamic React + D3 visualization for complex CS concepts, resulting in a 50% increase in time students spent on the platform.</p>
-<p>Given {company_name}’s commitment to innovation, I’m curious if you’re exploring similar front-end solutions. I’d love to share more about how these techniques could benefit your team—perhaps in a brief demo or call.</p>
-""",
-    "fullstack_direct_bullets": """
-Subject: Full-stack impact in 3 bullet points
+I am confident that my background in {role_type} would allow me to contribute significantly to your team. Would you be open to a brief conversation next week?
 
-<p>Hello {recipient_name},</p>
-<p>I’ll get straight to the point – here are three highlights of my full-stack experience:</p>
-<ul>
-    <li><b>CodeQuest101 (React/D3):</b> Increased user engagement by 40% through interactive visualizations.</li>
-    <li><b>Real-Time Chat App (MERN):</b> Scaled to 1K+ concurrent users with <20ms latency.</li>
-    <li><b>Personal Portfolio (Next.js):</b> Reduced page load time by 30% via optimized code and caching.</li>
-</ul>
-<p>I’m passionate about building high-performance web apps, and I’d love to bring these skills to {company_name}. Can we schedule a quick chat to discuss how I can contribute to your {role_type} team?</p>
-""",
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 1: Referral",
+            "category": "Referral"
+        },
 
-    # --- AI/ML/Data Role Templates ---
-    "ai_metric_driven": """
-Subject: Improved NLP accuracy by {metric}% — idea for {company_name}'s AI team
+        # Tier 2: Value-First & Research (High Performance)
+        "value_proposition": {
+            "subject": "A thought on {Company}'s [specific project/product]",
+            "body": """Hi {{recipient_name_placeholder}},
 
-<p>Hello {recipient_name},</p>
-<p>I’m Ashish Kumar Mishra, a data enthusiast and recent B.Tech graduate specializing in AI/ML. In my Intelligent Research Nexus (IRN) project, I implemented a LangChain-based document analysis pipeline, improving retrieval accuracy by {metric}%.</p>
-<p>I understand {company_name} values data-driven innovation, and I’m confident that this result-driven approach can advance your AI initiatives.</p>
-<p>I’d welcome the chance to discuss how my experience could be applied at {company_name}—perhaps in a brief call.</p>
-""",
-    "ai_quick_question": """
-Subject: Quick question about {role_type} roles at {company_name}
+My name is {sender_name}, and I've been following {Company}'s innovative work in the industry. Your recent progress on [mention specific project from Tavily research] caught my attention, and it aligns closely with my expertise in {role_type}.
 
-<p>Hello {recipient_name},</p>
-<p>I hope you’re well. My name is Ashish and I’m exploring AI/ML opportunities as a new graduate. I recently completed a project called Reddit NLP Tracker, where I built a sentiment analysis pipeline on social media comments, achieving around 90% accuracy.</p>
-<p>I noticed that {company_name} tackles interesting data challenges, and I’m keen to learn if there are {role_type} openings on your team. Could you point me to the right person, or let me know the best way to apply?</p>
-""",
-    "ai_story": """
-Subject: My journey from 2048 game bot to data science graduate
+In a recent project, I [mention a quantifiable achievement, e.g., 'developed a full-stack feature that increased user engagement by 15%']. I believe a similar approach could bring significant value to your current initiatives.
 
-<p>Hello {recipient_name},</p>
-<p>As a fun challenge during my studies, I built an AI bot to play the game 2048 using Deep Q-Learning. The bot reached the 95th percentile performance in over 10K simulated games. That project fueled my passion for machine learning, leading me to more advanced work like the IRN document analysis tool.</p>
-<p>Now as a graduate, I’m excited to apply this hands-on experience at {company_name}. Could we connect for a quick chat about how my skills might fit your AI/ML team?</p>
-""",
-    "ai_curiosity": """
-Subject: {recipient_name}, have you tried leveraging LLMs for data insights?
+I've attached my resume for your review. I'm eager to discuss how my skills could help {Company} achieve its goals.
 
-<p>Hello {recipient_name},</p>
-<p>Have you explored using large language models for enhanced data analysis? In my latest project, IRN, I used GPT and LangChain to summarize research papers, cutting information processing time by 50%.</p>
-<p>Given {company_name}’s focus on innovation, I thought this approach might be relevant. If you’re curious, I’d love to demo the tool I built or discuss how these techniques could assist {company_name}. Would you be available for a brief conversation or portfolio review?</p>
-""",
-    "ai_direct_bullets": """
-Subject: 3 AI/ML highlights: IRN, 95% accuracy, {metric}X speedup
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 2: Value-First",
+            "category": "Value-First"
+        },
+        "problem_solution": {
+            "subject": "Idea for tackling [relevant challenge] at {Company}",
+            "body": """Hi {{recipient_name_placeholder}},
 
-<p>Hello {recipient_name},</p>
-<p>Three quick facts about my AI/ML work:</p>
-<ul>
-    <li><b>Intelligent Research Nexus (IRN):</b> Built an AI pipeline using RAG and LangChain, reducing research time by {metric}%.</li>
-    <li><b>Reddit NLP Tracker:</b> Developed a sentiment analysis model achieving 95% accuracy.</li>
-    <li><b>2048 Game Bot:</b> Created a deep learning agent reaching the 95th percentile in performance over 10K games.</li>
-</ul>
-<p>I’m confident these skills can drive results at {company_name}. Would you have time for a short call to discuss how I can contribute to your {role_type} team’s success?</p>
-"""
+My name is {sender_name}. While researching {Company}, I was thinking about the challenge of [mention a relevant industry problem, e.g., 'optimizing data pipelines for real-time analytics'].
+
+My background in {role_type} has equipped me with the skills to address such problems. For instance, I recently [describe a project where you solved a similar problem], which resulted in [quantifiable outcome].
+
+I am very impressed by {Company}'s approach to innovation and would welcome the opportunity to discuss how I could contribute. My resume is attached.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 2: Value-First",
+            "category": "Value-First"
+        },
+        "company_insight": {
+            "subject": "Regarding {Company}'s recent achievement",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. I was excited to read about {Company}'s recent [mention news or announcement from Tavily research]. It's a testament to your team's expertise and forward-thinking vision.
+
+This development resonates with my own experience in {role_type}, where I've focused on [mention relevant skill or technology]. I believe my background could be a strong asset to your team as you continue to build on this success.
+
+I have attached my resume and would appreciate the chance to discuss this further.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 2: Research",
+            "category": "Company Research"
+        },
+        "industry_trend": {
+            "subject": "The trend towards [industry trend] and {Company}",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. With the growing importance of [mention industry trend], I've been closely following how innovative companies like {Company} are adapting.
+
+My work in {role_type} has given me hands-on experience in this area, including [mention a relevant project or skill]. I'm confident I could help your team stay ahead of the curve.
+
+My resume is attached for your consideration. I look forward to the possibility of connecting.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 2: Research",
+            "category": "Company Research"
+        },
+
+        # Tier 3: Metric-Driven (Solid Performance)
+        "fullstack_performance": {
+            "subject": "Full-Stack Developer | Performance Optimization",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. I am a Full-Stack Developer with a focus on performance. In a past project, I successfully reduced API response times by 40% through strategic code optimization.
+
+I am very interested in opportunities at {Company}. My resume is attached.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 3: Metric-Driven",
+            "category": "Metric-Driven"
+        },
+        "ai_accuracy": {
+            "subject": "AI/ML Engineer | Model Accuracy Improvement",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. As an AI/ML Engineer, I specialize in enhancing model performance. I recently improved a classification model's accuracy from 85% to 92% by implementing advanced feature engineering techniques.
+
+I am drawn to the work being done at {Company}. My resume is attached.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 3: Metric-Driven",
+            "category": "Metric-Driven"
+        },
+        "ai_efficiency": {
+            "subject": "AI/ML Engineer | Model Efficiency",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}, an AI/ML Engineer focused on computational efficiency. I recently optimized a deep learning model, reducing its inference time by 60% and memory usage by 45%.
+
+I am excited by the challenges at {Company}. My resume is attached.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 3: Metric-Driven",
+            "category": "Metric-Driven"
+        },
+        "fullstack_scalability": {
+            "subject": "Full-Stack Developer | Scalable Architectures",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. I am a Full-Stack Developer who designs systems for scale. I have architected and deployed applications on AWS that serve over 100,000 daily active users.
+
+I am looking for a new challenge and {Company} is at the top of my list. My resume is attached.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 3: Metric-Driven",
+            "category": "Metric-Driven"
+        },
+
+        # Tier 4: Story-Based (Good Performance)
+        "journey_narrative": {
+            "subject": "My path to {role_type} and my interest in {Company}",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. My journey into {role_type} began with a fascination for [mention a specific interest], which led me to build [mention a personal project]. This experience taught me the power of combining creativity with technical skill to solve meaningful problems.
+
+I see this same spirit in {Company}'s work, especially [mention a company value or project]. I am eager to contribute my passion and skills to your team.
+
+My resume is attached, and I would love to share more about my story.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 4: Story-Based",
+            "category": "Story-Based"
+        },
+        "challenge_overcome": {
+            "subject": "How a past challenge prepared me for a role at {Company}",
+            "body": """Hi {{recipient_name_placeholder}},
+
+My name is {sender_name}. In a recent academic project, we hit a major roadblock with [describe a technical challenge]. I took the lead on architecting a new solution using [mention technology], which not only solved the problem but also improved our results by [quantifiable metric].
+
+This experience reinforced my passion for collaborative problem-solving. I am confident I can bring this same proactive and resilient mindset to {Company}.
+
+My resume is attached. I look forward to hearing from you.
+
+Best regards,
+{sender_name}
+{sender_linkedin}
+{sender_github}""",
+            "performance_tier": "Tier 4: Story-Based",
+            "category": "Story-Based"
+        }
+    },
+    "follow_up": {
+        "polite_check_in": {
+            "subject": "Re: {original_subject}",
+            "body": """Hi {{recipient_name_placeholder}},
+
+I hope you're having a productive week.
+
+I'm writing to follow up on my previous email regarding a {role_type} position. I'm still very interested in the possibility of joining your team at {Company} and believe my skills in [mention 1-2 key skills] would be a great match.
+
+Would you have a moment to connect in the coming days?
+
+Best regards,
+{sender_name}""",
+            "performance_tier": "N/A",
+            "category": "Follow-Up"
+        },
+        "value_add": {
+            "subject": "Re: {original_subject}",
+            "body": """Hi {{recipient_name_placeholder}},
+
+Hope you're well.
+
+I saw the recent news about [mention recent company news or article] and it reminded me of my interest in {Company}. It's exciting to see your progress in this area.
+
+As a quick reminder, my background in {role_type} includes [mention a relevant skill or achievement].
+
+I've re-attached my resume for your convenience.
+
+Best regards,
+{sender_name}""",
+            "performance_tier": "N/A",
+            "category": "Follow-Up"
+        }
+    }
 }
 
+def get_template_performance_tier(template_name: str) -> str:
+    """Returns the performance tier of a given template."""
+    for template_group in TEMPLATES.values():
+        if template_name in template_group:
+            return template_group[template_name].get("performance_tier", "Unknown")
+    logger.warning(f"Could not find performance tier for template: {template_name}")
+    return "Unknown"
 
-# --- FOLLOW-UP TEMPLATES (Unchanged) ---
-FOLLOWUP_TEMPLATES = {
-    "first_followup": f"""
-Subject: Following up on {{Company}} opportunity
+def get_template_category(template_name: str) -> str:
+    """Returns the category of a given template."""
+    for template_group in TEMPLATES.values():
+        if template_name in template_group:
+            return template_group[template_name].get("category", "Unknown")
+    logger.warning(f"Could not find category for template: {template_name}")
+    return "Unknown"
 
-<p>Dear {{recipient_name_placeholder}},</p><p>I hope you're having a great week. I'm writing to follow up on my previous email regarding my interest in {{Company}}.</p><p>{{personalized_line_based_on_research}}</p><p>I'm still very excited about the possibility of contributing to your team.</p>{SIGNATURE}
-""",
-
-    "value_add_followup": f"""
-Subject: Thought you'd find this interesting - {{relevant_topic}}
-
-<p>Hi {{recipient_name_placeholder}},</p>
-<p>I came across {{relevant_article_or_trend}} and thought it might interest you given {{company_name}}'s work in {{company_focus_area}}.</p>
-<p>This relates to my experience with {{relevant_project}} where I {{relevant_achievement}}. Still excited about the {{role_type}} opportunity we discussed.</p>
-{SIGNATURE}
-""",
-
-    "final_followup": f"""
-Subject: Final note - {{role_type}} timeline
-
-<p>Hi {{recipient_name_placeholder}},</p>
-<p>As I complete my final semester preparations, I wanted to reach out one last time about the {{role_type}} position.</p>
-<p>My graduation timeline of {{graduation_date}} means I'm actively finalizing my career path. {{company_name}} remains my top choice because of {{specific_company_reason}}.</p>
-<p>If the timing isn't right now, I'd appreciate staying connected for future opportunities.</p>
-{SIGNATURE}
-"""
-}
-
-
-ALL_TEMPLATES = {
-    'initial': EMAIL_TEMPLATES,
-    'followup': FOLLOWUP_TEMPLATES
-}
-
-def get_template(template_type: str, template_name: str) -> str:
+def populate_template(template_type: str, template_name: str, recipient_data: dict, sender_data: dict, tavily_results: str, resume_text: str) -> tuple[str, str]:
     """
-    Retrieves a template by type and name.
+    Populates a template with dynamic data.
+    (This is a simplified placeholder - the real logic is now in the AI prompt of generate_fresher_email)
     """
     try:
-        return ALL_TEMPLATES[template_type][template_name]
-    except KeyError as e:
-        raise ValueError(f"Template not found for type '{template_type}' and name '{template_name}'") from e
+        template = TEMPLATES[template_type][template_name]
+        subject = template['subject']
+        body = template['body']
+
+        # Combine all data sources
+        all_data = {**recipient_data, **sender_data}
+
+        # Basic placeholder replacement
+        for key, value in all_data.items():
+            placeholder = "{" + key + "}"
+            # Ensure value is a string before replacing
+            str_value = str(value) if value is not None else ""
+            subject = subject.replace(placeholder, str_value)
+            body = body.replace(placeholder, str_value)
+
+        return subject, body
+
+    except KeyError:
+        logger.error(f"Template '{template_name}' not found in type '{template_type}'.")
+        return "Error: Template not found", "Could not generate email body because the template was not found."
+    except Exception as e:
+        logger.error(f"Failed to populate template '{template_name}': {e}")
+        return "Error: Generation failed", f"An unexpected error occurred: {e}"

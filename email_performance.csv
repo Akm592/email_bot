@@ -1,0 +1,11 @@
+timestamp,template_name,company_name,response_received,response_type
+2025-07-03 23:55:41,referral_introduction,Neysa,False,
+2025-07-03 23:57:18,referral_introduction,Stripe,False,
+2025-07-03 23:57:41,referral_introduction,Google,False,
+2025-07-03 23:58:57,referral_introduction,Microsoft,False,
+2025-07-04 00:59:12,referral_introduction,Pixxel,False,
+2025-07-04 00:59:35,referral_introduction,Neysa,False,
+2025-07-04 00:59:56,referral_introduction,Stripe,False,
+2025-07-04 01:00:28,referral_introduction,Google,False,
+2025-07-04 01:00:50,referral_introduction,Microsoft,False,
+2025-07-04 01:17:19,referral_introduction,Pixxel,False,
