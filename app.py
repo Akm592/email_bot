@@ -91,115 +91,97 @@ def sync_to_google_sheets_gradio():
 def start_outreach(input_csv_file, manual_resume_override, email_send_count):
     """Processes an uploaded CSV, uses AI to analyze, and starts the outreach process."""
     global df, GMAIL_SERVICE
+    
     logging.info("Start Outreach button clicked.")
-
+    
     if input_csv_file is not None:
         try:
             new_contacts_df = pd.read_csv(input_csv_file.name, encoding='utf-8')
-            # --- MODIFICATION ---
+            
             # Standardize column names
             rename_map = {
                 "Name": "Recipient Name",
                 "Email": "Recipient Email",
-                "Referral_Name": "Referral Name", # Handle different possible input names
+                "Referral_Name": "Referral Name",
                 "Referral": "Referral Name"
             }
             new_contacts_df = new_contacts_df.rename(columns=lambda c: rename_map.get(c, c))
-            # --- END MODIFICATION ---
-
+            
             new_contacts_df["Recipient Email"] = new_contacts_df["Recipient Email"].astype(str).apply(clean_email_address)
-            new_contacts_df["Email Status"] = "Pending"
             
             # Create a master list of known emails
             known_emails = df["Recipient Email"].tolist()
-
+            
             # Filter out contacts that are already in the master list
             genuinely_new_contacts_df = new_contacts_df[~new_contacts_df["Recipient Email"].isin(known_emails)].copy()
-
+            
             if genuinely_new_contacts_df.empty:
                 logging.info("No new contacts found in the uploaded CSV. All contacts already exist in the system.")
                 return df, "No new contacts found in the uploaded CSV. All contacts already exist in the system."
-
-            # Add only genuinely new contacts
-            df = pd.concat([df, genuinely_new_contacts_df], ignore_index=True)
-            # Fill any missing new columns with empty strings to conform to schema
+            
+            # **FIX: Only take the number of contacts we plan to send emails to**
+            contacts_to_process = genuinely_new_contacts_df.head(email_send_count).copy()
+            
+            logging.info(f"Selected {len(contacts_to_process)} contacts for processing (from {len(genuinely_new_contacts_df)} available new contacts).")
+            
+            # Set initial status for contacts we're about to process
+            contacts_to_process["Email Status"] = "Pending"
+            
+            # Fill any missing columns with empty strings to conform to schema
             for col in ["Referral Name", "Referral Company", "Chosen Template", "Template Category"]:
-                if col not in df.columns:
-                    df[col] = ""
-            df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS) # Enforce schema
-            df.drop_duplicates(subset=["Recipient Email"], keep="last", inplace=True) # Ensure no duplicates after concat
-            df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS) # Enforce schema
+                if col not in contacts_to_process.columns:
+                    contacts_to_process[col] = ""
+            
+            # **FIX: Only add contacts that we're actually processing**
+            df = pd.concat([df, contacts_to_process], ignore_index=True)
+            df = df.reindex(columns=list(EXPECTED_COLUMNS.keys())).astype(EXPECTED_COLUMNS)
+            
             save_data()
-            logging.info(f"Loaded {len(genuinely_new_contacts_df)} new, unique contacts. Removed duplicates.")
+            
+            logging.info(f"Added {len(contacts_to_process)} contacts to process. {len(genuinely_new_contacts_df) - len(contacts_to_process)} contacts remain unprocessed.")
+            
         except Exception as e:
             logging.error(f"Error processing uploaded CSV file for {input_csv_file.name}: {e}")
             return df, f"Error processing uploaded CSV file for {input_csv_file.name}: {e}"
-
+    
     if not GMAIL_SERVICE:
         logging.warning("Gmail service not available. Cannot proceed with outreach.")
         return df, "Gmail service not available. Cannot proceed with outreach."
-
+    
     sent_count = 0
+    
+    # Process only pending contacts (which are now limited to email_send_count)
     for index, row in df.iterrows():
-        if sent_count >= email_send_count:
-            logging.info(f"Reached email limit of {email_send_count}.")
-            break
         if STOP_BOT_FLAG:
             logging.info("Bot stopped by user.")
             return df, "Outreach stopped by user."
+        
         if row["Email Status"] == "Pending":
             recipient_name = row["Recipient Name"]
             recipient_email = row["Recipient Email"]
             company_name = row["Company"]
             recruiter_title = row.get("Title", "")
-
+            
             logging.info(f"--- Processing: {recipient_name} at {company_name} ---")
             
+            # Research company
             logging.info("1. Researching company with Tavily...")
             company_info = search_company_background(company_name)
             df.loc[index, 'Company Info'] = json.dumps(company_info)
-
+            
             if company_info:
                 logging.info("-> Research complete.")
-
-                # AI Decides which resume type to use
+                
+                # AI decides resume type
                 final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
-                # Instant Fetch: Retrieve the corresponding text instantly from the global cache
                 resume_text = RESUME_CACHE.get(final_resume_type)
-
+                
                 if not resume_text:
                     logging.warning(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
                     continue
-
-                # Gather all necessary data from the row
-                referral_name = row.get("Referral Name")
-                referral_company = row.get("Referral Company")
-
-                # ...
+                
+                # Generate email
                 logging.info("2. Generating personalized email with AI...")
-                email_generation_result = generate_fresher_email(
-                    tavily_results=company_info,
-                    recipient_name=recipient_name,
-                    recipient_title=recruiter_title,
-                    company_name=company_name,
-                    role_type=final_resume_type,
-                    resume_text=resume_text,
-                    referral_name=referral_name,         # Pass the data
-                    referral_company=referral_company  # Pass the data
-                )
-
-                if "error" in email_generation_result:
-                    logging.error(f"-> Email generation failed: {email_generation_result['error']}. Skipping.")
-                    continue
-
-                # 1. AI Decides which resume type to use (this logic is preserved)
-                final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
-                resume_text = RESUME_CACHE.get(final_resume_type)
-                if not resume_text:
-                    logging.warning(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
-                    continue
-
-                # 2. AI generates email and DECIDES whether to attach the resume
                 email_generation_result = generate_fresher_email(
                     tavily_results=company_info,
                     recipient_name=recipient_name,
@@ -210,66 +192,78 @@ def start_outreach(input_csv_file, manual_resume_override, email_send_count):
                     referral_name=row.get("Referral Name"),
                     referral_company=row.get("Referral Company")
                 )
-
+                
                 if "error" in email_generation_result:
                     logging.error(f"-> Email generation failed: {email_generation_result['error']}. Skipping.")
                     continue
-
-                # 3. Extract the AI's decisions and the content
+                
+                # Extract email content
                 email_subject = email_generation_result["email_subject"]
                 email_body = email_generation_result["email_content"]
-                should_attach = email_generation_result.get("should_attach_resume", False) # Safety default
+                should_attach = email_generation_result.get("should_attach_resume", False)
                 safety_check_result = email_generation_result["safety_check_result"]
                 chosen_template_name = email_generation_result["template_used"]
-
-                logging.info(f"-> AI generated email using '{chosen_template_name}' template. Performance Tier: {email_generation_result.get('performance_tier', 'N/A')}")
                 
                 # Track email performance
                 track_email_performance(
                     template_name=chosen_template_name,
                     company_name=company_name,
-                    response_received=False, # Initial send, no response yet
+                    response_received=False,
                     response_type=None
                 )
                 
                 if safety_check_result == "APPROVE":
                     resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
-
-                    # 4. Create the message based on the AI's attachment decision
+                    
+                    # Create and send message
                     message = create_message_with_attachment(
                         config.SENDER_EMAIL,
                         recipient_email,
                         email_subject,
                         email_body,
-                        file=resume_path if should_attach else None # The core logic!
+                        file=resume_path if should_attach else None
                     )
-
-                    # 5. Send the message
+                    
                     if send_message(GMAIL_SERVICE, "me", message, recipient_email):
                         df.loc[index, "Email Status"] = "Sent"
                         df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
                         df.loc[index, "Resume Type"] = final_resume_type
-                        df.loc[index, "Chosen Template"] = email_generation_result.get("template_used", "")
+                        df.loc[index, "Chosen Template"] = chosen_template_name
                         df.loc[index, "Template Category"] = email_generation_result.get("template_category", "")
+                        
                         logging.info(f"--> Email sent successfully to {recipient_email}. Resume attached: {should_attach}")
-                        logging.info(f"    Template Used: {df.loc[index, 'Chosen Template']} ({email_generation_result.get('performance_tier', 'N/A')})")
                         save_data()
                         time.sleep(15)
                         sent_count += 1
                     else:
                         logging.error(f"--> FAILED to send email to {recipient_email}.")
-                else: # safety_check_result == "REJECT"
+                        df.loc[index, "Email Status"] = "Failed"
+                        save_data()
+                else:
                     df.loc[index, "Email Status"] = "Pending Review"
                     df.loc[index, "Generated Subject"] = email_subject
                     df.loc[index, "Generated Body"] = email_body
                     logging.warning(f"[FLAGGED FOR REVIEW]: Email for {company_name} has been flagged and requires manual review.")
-                    save_data() # Save immediately after flagging
+                    save_data()
             else:
                 logging.warning(f"--> Failed to get company info from Tavily. Skipping.")
+                df.loc[index, "Email Status"] = "Failed - No Company Info"
+                save_data()
+    
+    logging.info(f"\n--- Outreach complete. Processed {sent_count} emails. ---")
+    return df, f"Outreach complete. Processed {sent_count} emails out of {len(contacts_to_process)} loaded contacts."
 
-    save_data()
-    logging.info("\n--- Outreach complete for all pending contacts. ---")
-    return df, "Outreach complete for all pending contacts."
+def process_next_batch(email_send_count):
+    """Processes the next batch of contacts from the uploaded CSV file."""
+    global df
+    
+    logging.info("Processing next batch of contacts.")
+    
+    # Check if there are any contacts with status "Not Processed" (we'll need to track this)
+    # For now, we'll return a message asking to upload a new CSV
+    
+    return df, f"To process more contacts, please upload a new CSV file with the remaining contacts you want to process."
+
 
 def _check_and_follow_up_wrapper():
     """Wrapper function to integrate follow-up logic with the global df."""

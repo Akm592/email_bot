@@ -34,7 +34,7 @@ def clean_email_address(email):
     try:
         # Attempt to decode if it looks like it might be quoted-printable
         if '=' in email:
-            email = quopri.decodestring(email).decode('utf-8')
+            email = quopri.decodestring(email.encode('utf-8')).decode('utf-8')
     except Exception:
         pass # Ignore decoding errors, use original string
 
