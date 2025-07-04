@@ -6,7 +6,7 @@ dotenv.load_dotenv()
 
 # Google Sheet Configuration
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID') # IMPORTANT: Replace with your actual Google Sheet ID
-RANGE_NAME = os.getenv('RANGE_NAME', 'Sheet1!A:J') # Adjust based on your sheet columns
+RANGE_NAME = os.getenv('RANGE_NAME', 'Sheet1!A:K') # Adjust based on your sheet columns
 
 # Email Configuration
 SENDER_EMAIL = os.getenv('SENDER_EMAIL') # IMPORTANT: Replace with your actual sender email
@@ -40,3 +40,9 @@ FOLLOWUP_1_DAYS = 3
 FOLLOWUP_2_DAYS_AFTER_1 = 7
 FOLLOWUP_3_DAYS_AFTER_2 = 7
 PAUSE_FOR_AUTOREPLY_DAYS = 7
+
+# Cache Settings
+CACHE_ENABLED = True
+SEMANTIC_CACHE_ENABLED = True
+MAX_TAVILY_CALLS_PER_COMPANY = 3
+TAVILY_BATCH_SIZE = 5

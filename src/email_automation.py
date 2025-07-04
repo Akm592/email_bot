@@ -5,12 +5,11 @@ import os
 import json
 import logging
 
-import logging
-
 from src.gmail_api import get_gmail_service, create_message_with_attachment, send_message, check_for_replies, clean_email_address
 from src.email_generator import populate_template, extract_sender_details_from_resume
 from src.tavily_search import search_company_background
 import config
+from src.context_manager import context_aware_processor
 
 def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict, stop_flag: bool = False):
     if not gmail_service:

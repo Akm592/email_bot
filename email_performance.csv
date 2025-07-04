@@ -42,3 +42,6 @@ timestamp,template_name,company_name,response_received,response_type
 2025-07-04 16:40:12,referral_introduction,Cheers Interactive,False,
 2025-07-04 17:50:44,referral_introduction,Valeo Health,False,
 2025-07-04 17:56:03,referral_introduction,Zomato,False,
+2025-07-04 22:43:52,company_insight,Nvidia,False,
+2025-07-04 22:46:59,company_insight,Nvidia,False,
+2025-07-04 23:27:27,referral_introduction,Zerodha,False,

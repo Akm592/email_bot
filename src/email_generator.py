@@ -8,6 +8,26 @@ import config
 from .templates import TEMPLATES
 import logging
 import pandas as pd
+import hashlib
+from typing import Dict, Any
+
+class ResumeAnalysisCache:
+    def __init__(self):
+        self.cache = {}
+
+    def get_analysis(self, resume_type: str, resume_text: str, analysis_func) -> Dict:
+        text_hash = hashlib.md5(resume_text.encode()).hexdigest()
+        cache_key = f"{resume_type}:{text_hash}"
+        if cache_key in self.cache:
+            logging.info(f"Resume analysis cache hit for {resume_type}")
+            return self.cache[cache_key]
+        
+        logging.info(f"Resume analysis cache miss for {resume_type}. Performing analysis...")
+        analysis = analysis_func(resume_text) # Call the actual analysis function
+        self.cache[cache_key] = analysis
+        return analysis
+
+resume_analysis_cache = ResumeAnalysisCache()
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -34,8 +54,8 @@ def load_resume_text(resume_path: str) -> str:
         logger.error(f"Error loading resume from {resume_path}: {e}")
         return ""
 
-def analyze_and_choose_resume(tavily_results: dict, recruiter_title: str) -> str:
-    """Uses Gemini to decide which resume to send based on structured Tavily results."""
+def _perform_resume_choice_analysis_internal(tavily_results: dict, recruiter_title: str) -> str:
+    """Internal function to perform the actual Gemini call for resume choice analysis."""
     model = genai.GenerativeModel(MODEL_NAME)
     
     research_summary_for_prompt = json.dumps(tavily_results, indent=2)
@@ -48,7 +68,7 @@ def analyze_and_choose_resume(tavily_results: dict, recruiter_title: str) -> str
 
     **Recruiter's Title:** "{recruiter_title}"
 
-    Analyze the research, especially the `technicalProfile` and `hiringIntelligence` sections, and the recruiter's title. 
+    Analyze the research, especially the `technicalProfile` and `hiringIntelligence` sections, and the recruiter's title.
     Should I send my "AI/ML" resume or my "Fullstack" resume?
 
     Your entire response MUST be ONLY ONE of the following two options:
@@ -66,6 +86,30 @@ def analyze_and_choose_resume(tavily_results: dict, recruiter_title: str) -> str
     except Exception as e:
         logger.error(f"Gemini error during resume analysis: {e}")
         return "Fullstack"
+
+def _perform_resume_choice_analysis_wrapper(input_string: str) -> str:
+    """Wrapper to parse input string and call the internal resume choice analysis function."""
+    try:
+        data = json.loads(input_string)
+        tavily_results = data['tavily_results']
+        recruiter_title = data['recruiter_title']
+        return _perform_resume_choice_analysis_internal(tavily_results, recruiter_title)
+    except Exception as e:
+        logger.error(f"Error in resume choice analysis wrapper: {e}")
+        return "Fullstack" # Default fallback
+
+def analyze_and_choose_resume(tavily_results: dict, recruiter_title: str) -> str:
+    """Uses Gemini to decide which resume to send based on structured Tavily results, with caching."""
+    input_for_cache = json.dumps({
+        "tavily_results": tavily_results,
+        "recruiter_title": recruiter_title
+    })
+    
+    return resume_analysis_cache.get_analysis(
+        resume_type="resume_choice",
+        resume_text=input_for_cache,
+        analysis_func=_perform_resume_choice_analysis_wrapper
+    )
 
 def decide_whether_to_attach_resume(tavily_results: dict) -> bool:
     """
@@ -90,8 +134,8 @@ def determine_graduation_timeline() -> str:
     else:
         return "upcoming semester"
 
-def extract_sender_details_from_resume(resume_text: str) -> dict:
-    """Uses Gemini to extract key personal details from a resume text."""
+def _perform_sender_details_extraction(resume_text: str) -> dict:
+    """Internal function to perform the actual Gemini call for sender details extraction."""
     model = genai.GenerativeModel(MODEL_NAME)
     prompt = f'''
     From the following resume text, extract the candidate's degree, a concise list of their key technical skills,
@@ -122,20 +166,18 @@ def extract_sender_details_from_resume(resume_text: str) -> dict:
         logger.error(f"Error extracting sender details from resume: {e}")
         return {"degree": "", "key_skills": "", "project_experience": "", "name": ""}
 
-def choose_initial_template(tavily_results: dict, role_type: str, referral_name: str = None) -> tuple[str, str]:
-    """
-    Strategically selects the best initial outreach template based on structured data.
-    """
-    logger.info("Strategically choosing an email template...")
+def extract_sender_details_from_resume(resume_text: str) -> dict:
+    """Uses cache for sender details extraction from a resume text."""
+    return resume_analysis_cache.get_analysis(
+        resume_type="sender_details",
+        resume_text=resume_text,
+        analysis_func=_perform_sender_details_extraction
+    )
 
-    if referral_name and pd.notna(referral_name) and referral_name.strip() != "":
-        logger.info(f"Referral found: {referral_name}. Selecting 'referral_introduction' template.")
-        return "initial", "referral_introduction"
+from src.context_manager import context_aware_processor
 
-    model = genai.GenerativeModel(MODEL_NAME)
-    
-    research_summary_for_prompt = json.dumps(tavily_results, indent=2)
-    
+def _perform_template_choice_internal(tavily_results: dict, role_type: str, referral_name: str = None) -> tuple[str, str]:
+    """Internal function to perform the actual Gemini call for template choice."""    
     template_style_descriptions = '''
     - `value_proposition`, `problem_solution`: (Value-First) Leads with a specific, quantifiable achievement or solution. Ideal for data-driven companies.
     - `company_insight`, `industry_trend`: (Company Research) Shows you've done homework. Good for companies with recent news.
@@ -150,33 +192,56 @@ def choose_initial_template(tavily_results: dict, role_type: str, referral_name:
         available_templates = ['value_proposition', 'company_insight', 'fullstack_performance', 'fullstack_scalability', 'challenge_overcome']
         role_context = "The user is applying for a Fullstack or Frontend developer role."
 
-    prompt = f'''
-    You are an expert career strategist. Your task is to select the single best email template for a job-seeking fresher.
+    # Use ContextAwareProcessor to select the optimal template
+    company_cluster = tavily_results.get("secondaryContext", {}).get("businessContext", {}).get("companyName", "") # Placeholder for actual clustering
+    if not company_cluster:
+        company_cluster = tavily_results.get("secondaryContext", {}).get("businessContext", {}).get("companyWebsite", {}).get("data", "unknown_company")
 
-    **Context:** {role_context}
+    optimal_template = context_aware_processor.select_optimal_template(available_templates, company_cluster)
     
-    **Comprehensive Company Research (Structured JSON):**
-    {research_summary_for_prompt}
+    # If the optimal template is not one of the available ones, fall back to the first available
+    if optimal_template not in available_templates:
+        optimal_template = available_templates[0]
 
-    **Available Template Styles and Their Purpose:**
-    {template_style_descriptions}
-    
-    **List of Available Template Names for this Role:**
-    {available_templates}
+    # The rest of the Gemini call for template selection is no longer needed if we rely on performance data
+    # However, if we want Gemini to *learn* and *suggest* new templates, this part would be re-integrated
+    # For now, we're using the performance data directly.
+    logger.info(f"Selected optimal template: {optimal_template} for role type: {role_type}.")
+    return "initial", optimal_template
 
-    Analyze all the information. Based on the `primaryInsights` and `actionableIntelligence` in the research, choose the most appropriate template NAME from the list provided. Your response MUST be ONLY the single template name you choose.
-    '''
+def _perform_template_choice_wrapper(input_string: str) -> tuple[str, str]:
+    """Wrapper to parse input string and call the internal template choice function."""
     try:
-        response = model.generate_content(prompt)
-        choice = response.text.strip()
-        logger.info(f"AI chose template: {choice} for role type: {role_type}.")
-        if choice in available_templates:
-            return "initial", choice
-        logger.warning(f"AI returned a template name not in the available list: '{choice}'. Defaulting.")
-        return "initial", available_templates[0]
+        data = json.loads(input_string)
+        tavily_results = data['tavily_results']
+        role_type = data['role_type']
+        referral_name = data.get('referral_name')
+        return _perform_template_choice_internal(tavily_results, role_type, referral_name)
     except Exception as e:
-        logger.error(f"Gemini error during template selection: {e}")
-        return "initial", available_templates[0]
+        logger.error(f"Error in template choice wrapper: {e}")
+        return "initial", "value_proposition" # Default fallback
+
+def choose_initial_template(tavily_results: dict, role_type: str, referral_name: str = None) -> tuple[str, str]:
+    """
+    Strategically selects the best initial outreach template based on structured data, with caching.
+    """
+    logger.info("Strategically choosing an email template...")
+
+    if referral_name and pd.notna(referral_name) and referral_name.strip() != "":
+        logger.info(f"Referral found: {referral_name}. Selecting 'referral_introduction' template.")
+        return "initial", "referral_introduction"
+
+    input_for_cache = json.dumps({
+        "tavily_results": tavily_results,
+        "role_type": role_type,
+        "referral_name": referral_name
+    })
+
+    return resume_analysis_cache.get_analysis(
+        resume_type="template_choice",
+        resume_text=input_for_cache,
+        analysis_func=_perform_template_choice_wrapper
+    )
 
 def populate_template(template_type: str, template_name: str, tavily_results: dict, recipient_data: dict, sender_data: dict, resume_text: str, should_attach_resume: bool) -> tuple[str, str]:
     """
@@ -245,8 +310,8 @@ def populate_template(template_type: str, template_name: str, tavily_results: di
         body = f"<p>Dear {{recipient_name_placeholder}},</p><p>I am writing to express my strong interest in potential roles at your company.</p>"
         return subject, body
 
-def is_email_safe_to_send(email_subject: str, email_body: str, role_type: str, company_name: str) -> str:
-    """Uses Gemini to act as a quality guardrail, checking for relevance and critical errors."""
+def _perform_safety_check_internal(email_subject: str, email_body: str, role_type: str, company_name: str) -> str:
+    """Internal function to perform the actual Gemini call for email safety check."""
     model = genai.GenerativeModel(MODEL_NAME)
     prompt = f'''
     You are a Quality Assurance agent. The user is a '{role_type}' graduate applying to '{company_name}'.
@@ -266,6 +331,34 @@ def is_email_safe_to_send(email_subject: str, email_body: str, role_type: str, c
     except Exception as e:
         logger.error(f"Error during email safety check: {e}")
         return "REJECT"
+
+def _perform_safety_check_wrapper(input_string: str) -> str:
+    """Wrapper to parse input string and call the internal safety check function."""
+    try:
+        data = json.loads(input_string)
+        return _perform_safety_check_internal(
+            data['email_subject'],
+            data['email_body'],
+            data['role_type'],
+            data['company_name']
+        )
+    except Exception as e:
+        logger.error(f"Error in safety check wrapper: {e}")
+        return "REJECT" # Default fallback
+
+def is_email_safe_to_send(email_subject: str, email_body: str, role_type: str, company_name: str) -> str:
+    """Uses Gemini to act as a quality guardrail, checking for relevance and critical errors, with caching."""
+    input_for_cache = json.dumps({
+        "email_subject": email_subject,
+        "email_body": email_body,
+        "role_type": role_type,
+        "company_name": company_name
+    })
+    return resume_analysis_cache.get_analysis(
+        resume_type="email_safety_check",
+        resume_text=input_for_cache,
+        analysis_func=_perform_safety_check_wrapper
+    )
 
 def generate_fresher_email(
     tavily_results: dict,
@@ -430,7 +523,7 @@ def generate_follow_up_email(
 
 def track_email_performance(template_name: str, company_name: str, response_received: bool, response_type: str = None):
     """
-    Tracks the performance of email templates by logging to a CSV file.
+    Tracks the performance of email templates by logging to a CSV file and updating the ContextAwareProcessor.
     """
     log_file = 'email_performance.csv'
     log_entry = {
@@ -447,6 +540,10 @@ def track_email_performance(template_name: str, company_name: str, response_rece
         
         # Append to CSV
         pd.DataFrame([log_entry]).to_csv(log_file, mode='a', header=not file_exists, index=False)
+        
+        # Update context-aware processor
+        from src.context_manager import context_aware_processor
+        context_aware_processor.update_template_performance(template_name, company_name, response_received)
         
     except Exception as e:
         logger.error(f"Error tracking email performance: {e}")

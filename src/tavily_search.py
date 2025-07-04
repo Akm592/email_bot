@@ -1,12 +1,15 @@
 # src/tavily_search.py
 
 import logging
-
 from tavily import TavilyClient
 import config
 import json
 import os
 from datetime import datetime, timedelta
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
+from typing import Optional, Any, List, Dict
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -14,41 +17,117 @@ TAVILY_API_KEY = config.TAVILY_API_KEY
 CACHE_FILE = "data/tavily_cache.json"
 CACHE_DURATION_HOURS = 24
 
-def _load_cache():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+class BatchTavilyProcessor:
+    def __init__(self):
+        self.tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
-def _save_cache(cache):
-    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(cache, f, indent=2)
+    async def process_company_batch(self, companies: List[str]) -> Dict:
+        batch_queries = []
+        for company in companies:
+            batch_queries.extend([
+                f"Recent news about {company}",
+                f"Job openings at {company}",
+                f"Tech stack at {company}"
+            ])
+        
+        # Single API call for multiple queries
+        results = await self.tavily.batch_search(batch_queries)
+        return self._organize_results_by_company(results, companies)
+
+    def _organize_results_by_company(self, results: List[Dict], companies: List[str]) -> Dict:
+        organized_results = {company: {} for company in companies}
+        query_types = ["Recent news about ", "Job openings at ", "Tech stack at "]
+        
+        # Assuming results are in the same order as batch_queries
+        for i, company in enumerate(companies):
+            for j, query_type_prefix in enumerate(query_types):
+                # Calculate the index in the flat results list
+                result_index = i * len(query_types) + j
+                if result_index < len(results):
+                    query_type_key = query_type_prefix.replace(f" {company}", "").strip().replace(" ", "_").lower()
+                    organized_results[company][query_type_key] = results[result_index]
+        return organized_results
+
+
+
+class IntelligentCache:
+    def __init__(self):
+        self.cache_file = CACHE_FILE
+        self.cache_duration = timedelta(hours=CACHE_DURATION_HOURS)
+        self.memory_cache = self._load_cache() # L1 Cache
+        self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.semantic_threshold = 0.85
+
+    def _load_cache(self):
+        if os.path.exists(self.cache_file):
+            with open(self.cache_file, 'r') as f:
+                return json.load(f)
+        return {}
+
+    def _save_cache(self):
+        os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+        with open(self.cache_file, 'w') as f:
+            json.dump(self.memory_cache, f, indent=2)
+
+    def get(self, query: str, cache_type: str = "company_insights") -> Optional[Any]:
+        now = datetime.utcnow()
+        
+        # 1. Exact match in memory cache
+        if query in self.memory_cache:
+            entry = self.memory_cache[query]
+            entry_time = datetime.fromisoformat(entry['timestamp'])
+            if now - entry_time < self.cache_duration:
+                logger.info(f"CACHE HIT (Exact): {query}")
+                return entry['results']
+            else:
+                logger.info(f"CACHE EXPIRED: {query}")
+                del self.memory_cache[query] # Remove expired entry
+
+        # 2. Semantic match
+        if config.SEMANTIC_CACHE_ENABLED:
+            semantic_match = self.find_semantic_match(query, cache_type)
+            if semantic_match:
+                logger.info(f"CACHE HIT (Semantic): {query}")
+                return semantic_match
+        
+        logger.info(f"CACHE MISS: {query}")
+        return None
+
+    def set(self, query: str, results: Any, cache_type: str = "company_insights"):
+        timestamp = datetime.utcnow().isoformat()
+        embedding = self.semantic_model.encode([query]).tolist() # Store as list for JSON
+        self.memory_cache[query] = {
+            "timestamp": timestamp,
+            "type": cache_type,
+            "results": results,
+            "embedding": embedding
+        }
+        self._save_cache()
+
+    def find_semantic_match(self, query: str, cache_type: str) -> Optional[Any]:
+        query_embedding = self.semantic_model.encode([query])
+        for cached_query, data in self.memory_cache.items():
+            if data.get('type') == cache_type and 'embedding' in data:
+                cached_embedding = np.array(data['embedding'])
+                similarity = util.cos_sim(query_embedding, cached_embedding)[0][0].item()
+                if similarity > self.semantic_threshold:
+                    # Update timestamp to extend life of semantically matched entry
+                    data['timestamp'] = datetime.utcnow().isoformat()
+                    self._save_cache()
+                    return data['results']
+        return None
+
+intelligent_cache = IntelligentCache()
 
 def get_structured_company_insights(company_name: str) -> dict:
     """
     Performs multiple targeted Tavily searches and returns a structured dictionary of insights.
     This is the most effective method for the AI.
     """
-    cache = _load_cache()
-    now = datetime.utcnow()
-    now_iso = now.isoformat()
-
-    # Phase 3, Step 8: Evolve the Cache Strategy
-    if company_name in cache:
-        entry = cache[company_name]
-        entry_time = datetime.fromisoformat(entry['timestamp'])
-        
-        # Tiered cache policy
-        if entry.get('source') == 'full_search':
-            if now - entry_time < timedelta(hours=CACHE_DURATION_HOURS):
-                logger.info(f"CACHE HIT: Using full cached results for {company_name}.")
-                return entry['results']
-        elif entry.get('source') == 'partial_cache':
-            # For partial cache, we can decide to refresh some data
-            # For now, we will just return the cached data
-            logger.info(f"CACHE HIT: Using partially cached results for {company_name}.")
-            return entry['results']
+    if config.CACHE_ENABLED:
+        cached_results = intelligent_cache.get(company_name)
+        if cached_results:
+            return cached_results
 
     logger.info(f"CACHE MISS: Performing new structured search for {company_name}.")
 
@@ -115,13 +194,13 @@ def get_structured_company_insights(company_name: str) -> dict:
             return score
 
         # Phase 4, Step 9: Design Graceful Degradation and Error Handling
-        def run_query(query, source_type, fallback_query=None):
+        def run_query(query, source_type, search_depth="advanced", max_results=5, fallback_query=None):
             """Helper function to run a Tavily search with fallback and return a structured result."""
             try:
                 response = tavily.qna_search(
                     query=query,
-                    search_depth="advanced",
-                    max_results=5
+                    search_depth=search_depth,
+                    max_results=max_results
                 )
                 if not response or "Unable to answer" in response:
                     if fallback_query:
@@ -155,42 +234,69 @@ def get_structured_company_insights(company_name: str) -> dict:
             }
             return scores.get(source_type, 0.5)
 
-        # Phase 1 Query Set (Basic Profile)
-        insights['businessContext']['companyWebsite'] = run_query(f"What is the official website for {company_name}?", "Official Website")
-        insights['businessContext']['linkedinUrl'] = run_query(f"What is the official LinkedIn page URL for {company_name}?", "LinkedIn")
+        # Define query priorities and limits
+        query_configs = [
+            {"query": f"entry level software engineer OR graduate software developer OR junior developer roles at {company_name} site:careers.{company_name}.com OR site:jobs.lever.co/{company_name} OR site:greenhouse.io/{company_name}", "source_type": "Official Career Page", "priority": 1, "depth": "advanced", "max_results": 3, "key": "relevantJobOpening"},
+            {"query": f"Does {company_name} have a university graduate program or internships?", "source_type": "General Search", "priority": 2, "depth": "advanced", "max_results": 3, "key": "fresherProgramStatus"},
+            {"query": f"latest news about {company_name} in the past month", "source_type": "News Article", "priority": 2, "depth": "advanced", "max_results": 3, "key": "recentNews"},
+            {"query": f"What is the tech stack at {company_name}? site:engineering.{company_name}.com", "source_type": "Engineering Blog", "priority": 3, "depth": "basic", "max_results": 2, "key": "techStack"},
+            {"query": f"employee reviews for {company_name} site:glassdoor.com", "source_type": "Glassdoor", "priority": 3, "depth": "basic", "max_results": 2, "key": "employeeReviews"},
+            {"query": f"What is the official website for {company_name}?", "source_type": "Official Website", "priority": 4, "depth": "basic", "max_results": 1, "key": "companyWebsite"},
+            {"query": f"What is the official LinkedIn page URL for {company_name}?", "source_type": "LinkedIn", "priority": 4, "depth": "basic", "max_results": 1, "key": "linkedinUrl"},
+            {"query": f"'{company_name} engineering blog'", "source_type": "Engineering Blog", "priority": 4, "depth": "basic", "max_results": 1, "key": "engineeringBlogs"},
+            {"query": f"main competitors of {company_name}", "source_type": "General Search", "priority": 4, "depth": "basic", "max_results": 1, "key": "competitiveLandscape"},
+        ]
 
-        # Phase 2 Query Set (Hiring Deep Dive)
-        insights['hiringIntelligence']['currentOpenings'].append(run_query(f"entry level software engineer site:careers.{company_name}.com", "Official Career Page"))
-        insights['hiringIntelligence']['currentOpenings'].append(run_query(f"new graduate software engineer site:careers.{company_name}.com", "Official Career Page"))
-        insights['hiringIntelligence']['relevantJobOpening'] = run_query(
-            f"entry level software engineer OR graduate software developer OR junior developer roles at {company_name} site:careers.{company_name}.com OR site:jobs.lever.co/{company_name} OR site:greenhouse.io/{company_name}",
-            "Official Career Page"
-        )
-        insights['hiringIntelligence']['fresherProgramStatus'] = run_query(f"Does {company_name} have a university graduate program or internships?", "General Search")
-        
-        # Phase 3 Query Set (Technical & Cultural Intel)
-        insights['technicalProfile']['engineeringBlogs'].append(run_query(f"'{company_name} engineering blog'", "Engineering Blog"))
-        insights['peopleAndCulture']['employeeReviews'].append(run_query(f"employee reviews for {company_name} site:glassdoor.com", "Glassdoor"))
-        insights['technicalProfile']['techStack'].append(run_query(f"What is the tech stack at {company_name}? site:engineering.{company_name}.com", "Engineering Blog"))
-        
-        # Phase 3, Step 7: Implement Advanced Search Modules
-        # Temporal Intelligence Module (Placeholder)
-        insights['businessContext']['recentNews'].append(run_query(f"latest news about {company_name} in the past month", "News Article"))
+        # Sort queries by priority
+        query_configs.sort(key=lambda x: x['priority'])
 
-        # Competitive Intelligence Module (Placeholder)
-        insights['businessContext']['competitiveLandscape'].append(run_query(f"main competitors of {company_name}", "General Search"))
+        api_calls_made = 0
+        max_api_calls = config.MAX_TAVILY_CALLS_PER_COMPANY # From config.py
 
-        # Network Mapping Module (Placeholder)
-        # This simulates finding a key piece of actionable intelligence.
-        # It's formatted as a standard data point to be processed uniformly.
-        insights['networkMapping'] = [{
-            "data": "A strong potential for referral exists as 5 alumni from your university work at this company.",
-            "sourceURL": "Simulated LinkedIn Search",
-            "timestamp": datetime.utcnow().isoformat(),
-            "sourceCredibilityScore": 0.85,
-            "temporalScore": 1.0,
-            "personalizationRelevance": 10 # This is highly relevant
-        }]
+        for q_config in query_configs:
+            if api_calls_made >= max_api_calls:
+                logger.info(f"Max API calls ({max_api_calls}) reached for {company_name}. Skipping remaining queries.")
+                break
+
+            result = run_query(
+                q_config['query'],
+                q_config['source_type'],
+                search_depth=q_config['depth'],
+                max_results=q_config['max_results']
+            )
+            
+            if result:
+                api_calls_made += 1
+                # Populate insights based on the key
+                if q_config['key'] == "relevantJobOpening":
+                    insights['hiringIntelligence']['relevantJobOpening'] = result
+                elif q_config['key'] == "fresherProgramStatus":
+                    insights['hiringIntelligence']['fresherProgramStatus'] = result
+                elif q_config['key'] == "recentNews":
+                    insights['businessContext']['recentNews'].append(result)
+                elif q_config['key'] == "techStack":
+                    insights['technicalProfile']['techStack'].append(result)
+                elif q_config['key'] == "employeeReviews":
+                    insights['peopleAndCulture']['employeeReviews'].append(result)
+                elif q_config['key'] == "companyWebsite":
+                    insights['businessContext']['companyWebsite'] = result
+                elif q_config['key'] == "linkedinUrl":
+                    insights['businessContext']['linkedinUrl'] = result
+                elif q_config['key'] == "engineeringBlogs":
+                    insights['technicalProfile']['engineeringBlogs'].append(result)
+                elif q_config['key'] == "competitiveLandscape":
+                    insights['businessContext']['competitiveLandscape'].append(result)
+
+        # Add simulated network mapping data if not already present
+        if not insights.get('networkMapping'):
+            insights['networkMapping'] = [{
+                "data": "A strong potential for referral exists as 5 alumni from your university work at this company.",
+                "sourceURL": "Simulated LinkedIn Search",
+                "timestamp": datetime.utcnow().isoformat(),
+                "sourceCredibilityScore": 0.85,
+                "temporalScore": 1.0,
+                "personalizationRelevance": 10 # This is highly relevant
+            }]
 
         # Phase 4 Query Set (Validation)
         insights['businessContext']['recentNews'].append(run_query(f"latest news about {company_name}", "News Article"))
@@ -198,15 +304,8 @@ def get_structured_company_insights(company_name: str) -> dict:
         # Phase 2, Step 6: Structure the Final Data for LLM Consumption
         final_structured_data = structure_for_llm(insights)
 
-        # Save the structured dictionary to the cache
-        # NOTE: Progressive enrichment logic was causing errors and has been simplified.
-        # The cache is now overwritten with the latest full search results.
-        cache[company_name] = {
-            "timestamp": now_iso,
-            "source": "full_search",
-            "results": final_structured_data
-        }
-        _save_cache(cache)
+        if config.CACHE_ENABLED:
+            intelligent_cache.set(company_name, final_structured_data)
 
         return final_structured_data
 
