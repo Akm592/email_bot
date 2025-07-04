@@ -55,6 +55,7 @@ def get_structured_company_insights(company_name: str) -> dict:
     # Phase 1, Step 1: Redefined Core Data Schema
     insights = {
         "hiringIntelligence": {
+            "relevantJobOpening": None, # NEW: To store the most relevant job post
             "currentOpenings": [],
             "fresherProgramStatus": "Unknown",
             "teamGrowthIndicators": [],
@@ -161,6 +162,10 @@ def get_structured_company_insights(company_name: str) -> dict:
         # Phase 2 Query Set (Hiring Deep Dive)
         insights['hiringIntelligence']['currentOpenings'].append(run_query(f"entry level software engineer site:careers.{company_name}.com", "Official Career Page"))
         insights['hiringIntelligence']['currentOpenings'].append(run_query(f"new graduate software engineer site:careers.{company_name}.com", "Official Career Page"))
+        insights['hiringIntelligence']['relevantJobOpening'] = run_query(
+            f"entry level software engineer OR graduate software developer OR junior developer roles at {company_name} site:careers.{company_name}.com OR site:jobs.lever.co/{company_name} OR site:greenhouse.io/{company_name}",
+            "Official Career Page"
+        )
         insights['hiringIntelligence']['fresherProgramStatus'] = run_query(f"Does {company_name} have a university graduate program or internships?", "General Search")
         
         # Phase 3 Query Set (Technical & Cultural Intel)

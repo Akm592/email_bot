@@ -12,7 +12,7 @@ from src.email_generator import populate_template, extract_sender_details_from_r
 from src.tavily_search import search_company_background
 import config
 
-def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):
+def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict, stop_flag: bool = False):
     if not gmail_service:
         logging.error("Failed to obtain Gmail service. Cannot proceed with follow-ups.")
         return df, "Failed to obtain Gmail service. Cannot proceed with follow-ups."
@@ -20,6 +20,9 @@ def check_and_follow_up(gmail_service, df: pd.DataFrame, resume_cache: dict):
     logging.info("Starting check and follow-up cycle.")
 
     for index, row in df.iterrows():
+        if stop_flag:
+            logging.info("Bot stopped by user during follow-up.")
+            return df, "Follow-up stopped by user."
         # --- REPLY CHECKING LOGIC (Remains the same, it's already excellent) ---
         recipient_email = clean_email_address(row["Recipient Email"])
         if not recipient_email:

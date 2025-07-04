@@ -12,7 +12,7 @@ import pandas as pd
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-2.0-flash-lite"
+MODEL_NAME = "gemini-2.0-flash"
 AI_ML_RESUME_PATH = config.AI_ML_RESUME
 FULLSTACK_RESUME_PATH = config.FULLSTACK_RESUME
 gem_key=config.GEMINI_API_KEY
@@ -66,6 +66,19 @@ def analyze_and_choose_resume(tavily_results: dict, recruiter_title: str) -> str
     except Exception as e:
         logger.error(f"Gemini error during resume analysis: {e}")
         return "Fullstack"
+
+def decide_whether_to_attach_resume(tavily_results: dict) -> bool:
+    """
+    Decides whether to attach a resume based on whether a specific job opening was found.
+    """
+    logger.info("Deciding whether to attach resume...")
+    # Check if the specific search for a job opening yielded a concrete result.
+    job_opening_data = tavily_results.get("hiringIntelligence", {}).get("relevantJobOpening")
+    if job_opening_data and "Unable to answer" not in job_opening_data.get("data", ""):
+        logger.info("-> Decision: ATTACH resume (specific job opening found).")
+        return True
+    logger.info("-> Decision: DO NOT ATTACH resume (general outreach).")
+    return False
 
 def determine_graduation_timeline() -> str:
     """Determine urgency based on current date and graduation timeline"""
@@ -165,7 +178,7 @@ def choose_initial_template(tavily_results: dict, role_type: str, referral_name:
         logger.error(f"Gemini error during template selection: {e}")
         return "initial", available_templates[0]
 
-def populate_template(template_type: str, template_name: str, tavily_results: dict, recipient_data: dict, sender_data: dict, resume_text: str) -> tuple[str, str]:
+def populate_template(template_type: str, template_name: str, tavily_results: dict, recipient_data: dict, sender_data: dict, resume_text: str, should_attach_resume: bool) -> tuple[str, str]:
     """
     Uses Gemini to fill in template placeholders using the new structured research data.
     """
@@ -181,60 +194,36 @@ def populate_template(template_type: str, template_name: str, tavily_results: di
 
     research_summary_for_prompt = json.dumps(tavily_results, indent=2)
 
+    # DYNAMIC INSTRUCTION based on the decision
+    attachment_instruction = ""
+    if should_attach_resume:
+        attachment_instruction = "The resume WILL BE ATTACHED to this email. Your email body MUST mention this. For example: 'I have attached my resume for your convenience and further details.'"
+    else:
+        attachment_instruction = "The resume WILL NOT be attached. Your email body MUST reflect this by politely OFFERING to send it. For example: 'I would be happy to share my resume if you find my background relevant.'"
+
     prompt = f'''
-    You are a master copywriter and career strategist. Your task is to write a hyper-personalized cold email to a recruiter using a template and highly-structured research data.
+    You are a master copywriter writing a cold email to an IT hiring manager.
 
-    **1. My Personal Details (from my resume):**
-    - My Name: {sender_data.get('name')}
-    - My Degree: {sender_data.get('degree')}
-    - My Key Skills: {sender_data.get('key_skills')}
-    - My Most Impressive Project: {sender_data.get('project_experience')}
-    - My Graduation Timeline: {determine_graduation_timeline()}
+    **MISSION:** Write a concise, personalized email based on the context provided.
 
-    **2. The Recipient:**
-    - Company: {recipient_data.get('Company')}
-    - Title: {recipient_data.get('Title')}
+    **1. SITUATIONAL CONTEXT (VERY IMPORTANT):**
+    *   **Attachment Status:** {attachment_instruction}
 
-    **3. Comprehensive Company Research (Structured JSON):**
-    Here is the detailed intelligence report you must use:
-    ```json
-    {research_summary_for_prompt}
-    ```
+    **2. DATA TO USE:**
+    *   **My Profile:** {json.dumps(sender_data)}
+    *   **Recipient:** {json.dumps(recipient_data)}
+    *   **Company Research & Job Openings:** {research_summary_for_prompt}
 
-    **4. The Email Template to Populate:**
-    ---
-    {template_text}
-    ---
+    **3. WRITING RULES:**
+    *   **Follow the Attachment Instruction:** Your email's content about the resume MUST match the instruction in the "Attachment Status" above. This is the most important rule.
+    *   **Be Specific:** If the research found a `relevantJobOpening`, mention it in the subject and body. This makes the email a direct application. If not, treat it as a networking request.
+    *   **Structure:** Keep it to 3-4 short paragraphs (Intro -> Value Prop -> Alignment -> CTA).
+    *   **CTA:** Your call to action should be a brief chat.
 
-    **CRITICAL INSTRUCTIONS (Follow these meticulously):**
-
-    1.  **Deconstruct the Research:** Deeply analyze the structured JSON.
-        *   `primaryInsights`: These are your most important points. Your email MUST prioritize these.
-        *   `personalizationHooks`: Use these to craft a compelling opening. For example, use `congratulateOn` for a recent achievement or `askAboutChallenge` to show you've thought about their problems.
-        *   `actionableIntelligence`: This is critical for your call to action. If `hiringUrgency` is 'High', be direct. If a `referralPathway` exists (like alumni), mention it subtly.
-        *   `secondaryContext`: Weave in details from here to show you've done thorough research beyond the headlines.
-
-    2.  **Strategic Content Generation:**
-        *   **Opening:** Start with a hook from `personalizationHooks`. It's more powerful than a generic opening.
-        *   **Body:** Connect my skills and project experience directly to the `primaryInsights`. If an insight mentions they use 'PyTorch for NLP', and my skills include 'PyTorch', explicitly connect those dots.
-        *   **Call to Action:** Frame your "ask" based on `actionableIntelligence`. If `hiringUrgency` is 'High', you might suggest a brief chat next week.
-
-    3.  **Tone Adjustment:**
-        *   Adjust tone based on `actionableIntelligence.hiringUrgency` and `secondaryContext.peopleAndCulture.missionAndValues`. If the company culture seems very formal, be more formal. If it's a startup, be more conversational.
-
-    4.  **Placeholder Rules:**
-        *   Fill all placeholders like `{{company_name}}`, `{{role_type}}`, etc., using the provided data.
-        *   For the greeting, you MUST use the exact placeholder `{{recipient_name_placeholder}}`. Do NOT use the actual recipient's name.
-
-    5.  **HTML Formatting:** The final email body must be formatted with simple HTML (`<p>`, `<br>`, `<ul>`, `<li>`, `<b>`). Every new paragraph MUST be enclosed in `<p>` tags.
-
-    6.  **JSON Output:** Your entire response MUST be a single, valid JSON object with "subject" and "body" keys. The body should NOT include my signature.
-
-    **Example JSON Output:**
-    {{
-      "subject": "Idea for leveraging LLMs in your new product line",
-      "body": "<p>Hello {{recipient_name_placeholder}},</p><p>I saw the news about your recent funding to expand your AI division and wanted to congratulate you. Given your focus on NLP, I was thinking about how my experience in building RAG systems with PyTorch could help accelerate your roadmap.</p><p>...</p>"
-    }}
+    **4. OUTPUT FORMAT:**
+    *   A single, valid JSON object with "subject" and "body" keys.
+    *   The body must be simple HTML.
+    *   Use the placeholder `{{recipient_name_placeholder}}` for the greeting.
     '''
     try:
         response = model.generate_content(prompt)
@@ -292,7 +281,10 @@ def generate_fresher_email(
     Complete fresher-optimized email generation pipeline.
     """
     logger.info("Starting strategic email generation...")
-    
+
+    # NEW: Make the attachment decision early
+    should_attach = decide_whether_to_attach_resume(tavily_results)
+
     sender_data = extract_sender_details_from_resume(resume_text)
     
     template_category, template_name = choose_initial_template(tavily_results, role_type, referral_name)
@@ -311,7 +303,8 @@ def generate_fresher_email(
         tavily_results=tavily_results,
         recipient_data=recipient_data,
         sender_data=sender_data,
-        resume_text=resume_text
+        resume_text=resume_text,
+        should_attach_resume=should_attach # Pass the decision
     )
 
     safety_check = is_email_safe_to_send(subject_line, ai_generated_body, role_type, company_name)
@@ -321,13 +314,32 @@ def generate_fresher_email(
 
     final_email_body = ai_generated_body.replace("{recipient_name_placeholder}", recipient_name)
     
-    # Signature is appended here in the final step
-    signature = f"<br><br><p>Best regards,</p><p>{sender_data.get('name')}</p>"
+    # Construct the new professional signature
+    signature_links = [
+        config.YOUR_LINKEDIN_URL,
+        config.YOUR_GITHUB_URL,
+        config.YOUR_PORTFOLIO_URL
+    ]
+    # Filter out any empty links
+    valid_links = [link for link in signature_links if link]
+    def get_display_name(url):
+        if "linkedin" in url:
+            return "LinkedIn"
+        elif "github" in url:
+            return "GitHub"
+        elif "portfolio" in url:
+            return "Portfolio"
+        else:
+            return url.split("://")[-1].split("/")[0] # Fallback to domain name
+    signature_html = " | ".join(f'<a href="{link}">{get_display_name(link)}</a>' for link in valid_links)
+
+    signature = f"<br><br><p>Best regards,</p><p>{sender_data.get('name')}<br>{signature_html}</p>"
     final_email_body += signature
 
     result = {
         "email_subject": subject_line,
         "email_content": final_email_body,
+        "should_attach_resume": should_attach, # CRITICAL: Return the decision
         "template_used": template_name,
         "template_category": template_category,
         "resume_choice": role_type,

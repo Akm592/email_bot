@@ -15,15 +15,22 @@ def get_sheets_service():
     creds = None
     logger.info("Attempting to get Google Sheets service.")
     if os.path.exists('token_sheets.json'):
-        creds = Credentials.from_authorized_user_file('token_sheets.json', SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file('token_sheets.json', SCOPES)
+        except ValueError:
+            logger.warning("Invalid token_sheets.json found, re-authenticating.")
+            creds = None  # Invalid token, proceed to re-authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             logger.info("Refreshing Google Sheets API credentials.")
             creds.refresh(Request())
         else:
+            if os.path.exists('token_sheets.json'):
+                os.remove('token_sheets.json') # Remove invalid token
+                logger.info("Removed invalid token_sheets.json.")
             logger.info("Initiating new Google Sheets API authentication flow.")
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=8081) # Use a different port for Sheets
+            creds = flow.run_local_server(port=8081, access_type='offline', prompt='consent') # Added access_type and prompt
         with open('token_sheets.json', 'w') as token:
             token.write(creds.to_json())
         logger.info("Google Sheets API authentication successful, token saved.")

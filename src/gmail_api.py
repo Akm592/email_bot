@@ -89,12 +89,13 @@ def create_message_with_attachment(sender, to, subject, message_text, file):
     # We now attach the message as 'html' instead of 'plain'
     message.attach(MIMEText(message_text, 'html', 'utf-8'))
 
-    with open(file, 'rb') as fp:
-        part = MIMEBase('application', 'octet-stream')
-        part.set_payload(fp.read())
-    encoders.encode_base64(part)
-    part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(file)}"')
-    message.attach(part)
+    if file:
+        with open(file, 'rb') as fp:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(fp.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(file)}"')
+        message.attach(part)
 
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
     return {'raw': raw_message}

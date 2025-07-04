@@ -21,6 +21,7 @@ from src.email_automation import check_and_follow_up
 RESUME_CACHE = {}
 GMAIL_SERVICE = None
 SHEETS_SERVICE = None
+STOP_BOT_FLAG = False # Global flag to stop the bot
 
 
 
@@ -87,7 +88,7 @@ def sync_to_google_sheets_gradio():
         return "Google Sheets service not available. Sync skipped."
 
 
-def start_outreach(input_csv_file, manual_resume_override):
+def start_outreach(input_csv_file, manual_resume_override, email_send_count):
     """Processes an uploaded CSV, uses AI to analyze, and starts the outreach process."""
     global df, GMAIL_SERVICE
     logging.info("Start Outreach button clicked.")
@@ -138,7 +139,14 @@ def start_outreach(input_csv_file, manual_resume_override):
         logging.warning("Gmail service not available. Cannot proceed with outreach.")
         return df, "Gmail service not available. Cannot proceed with outreach."
 
+    sent_count = 0
     for index, row in df.iterrows():
+        if sent_count >= email_send_count:
+            logging.info(f"Reached email limit of {email_send_count}.")
+            break
+        if STOP_BOT_FLAG:
+            logging.info("Bot stopped by user.")
+            return df, "Outreach stopped by user."
         if row["Email Status"] == "Pending":
             recipient_name = row["Recipient Name"]
             recipient_email = row["Recipient Email"]
@@ -184,13 +192,37 @@ def start_outreach(input_csv_file, manual_resume_override):
                     logging.error(f"-> Email generation failed: {email_generation_result['error']}. Skipping.")
                     continue
 
+                # 1. AI Decides which resume type to use (this logic is preserved)
+                final_resume_type = analyze_and_choose_resume(company_info, recruiter_title)
+                resume_text = RESUME_CACHE.get(final_resume_type)
+                if not resume_text:
+                    logging.warning(f"-> Resume text for {final_resume_type} not found in cache. Skipping.")
+                    continue
+
+                # 2. AI generates email and DECIDES whether to attach the resume
+                email_generation_result = generate_fresher_email(
+                    tavily_results=company_info,
+                    recipient_name=recipient_name,
+                    recipient_title=recruiter_title,
+                    company_name=company_name,
+                    role_type=final_resume_type,
+                    resume_text=resume_text,
+                    referral_name=row.get("Referral Name"),
+                    referral_company=row.get("Referral Company")
+                )
+
+                if "error" in email_generation_result:
+                    logging.error(f"-> Email generation failed: {email_generation_result['error']}. Skipping.")
+                    continue
+
+                # 3. Extract the AI's decisions and the content
                 email_subject = email_generation_result["email_subject"]
                 email_body = email_generation_result["email_content"]
-                final_resume_type = email_generation_result["resume_choice"]
-                chosen_template_name = email_generation_result["template_used"]
+                should_attach = email_generation_result.get("should_attach_resume", False) # Safety default
                 safety_check_result = email_generation_result["safety_check_result"]
+                chosen_template_name = email_generation_result["template_used"]
 
-                logging.info(f"-> AI generated email using '{chosen_template_name}' template. Performance Tier: {email_generation_result['performance_tier']}")
+                logging.info(f"-> AI generated email using '{chosen_template_name}' template. Performance Tier: {email_generation_result.get('performance_tier', 'N/A')}")
                 
                 # Track email performance
                 track_email_performance(
@@ -203,22 +235,27 @@ def start_outreach(input_csv_file, manual_resume_override):
                 if safety_check_result == "APPROVE":
                     resume_path = config.AI_ML_RESUME if final_resume_type == "AI/ML" else config.FULLSTACK_RESUME
 
-                    if not os.path.exists(resume_path):
-                        logging.warning(f"-> Resume not found at {resume_path}. Skipping.")
-                        continue
+                    # 4. Create the message based on the AI's attachment decision
+                    message = create_message_with_attachment(
+                        config.SENDER_EMAIL,
+                        recipient_email,
+                        email_subject,
+                        email_body,
+                        file=resume_path if should_attach else None # The core logic!
+                    )
 
-                    message = create_message_with_attachment(config.SENDER_EMAIL, recipient_email, email_subject, email_body, resume_path)
-                    # --- UPDATE THE DATA SAVING LOGIC ---
+                    # 5. Send the message
                     if send_message(GMAIL_SERVICE, "me", message, recipient_email):
                         df.loc[index, "Email Status"] = "Sent"
                         df.loc[index, "Sent Date"] = datetime.now().strftime("%Y-%m-%d")
                         df.loc[index, "Resume Type"] = final_resume_type
                         df.loc[index, "Chosen Template"] = email_generation_result.get("template_used", "")
                         df.loc[index, "Template Category"] = email_generation_result.get("template_category", "")
-                        logging.info(f"--> Email sent successfully to {recipient_email}.")
-                        logging.info(f"    Template Used: {df.loc[index, 'Chosen Template']} ({email_generation_result.get('performance_tier')})")
+                        logging.info(f"--> Email sent successfully to {recipient_email}. Resume attached: {should_attach}")
+                        logging.info(f"    Template Used: {df.loc[index, 'Chosen Template']} ({email_generation_result.get('performance_tier', 'N/A')})")
                         save_data()
                         time.sleep(15)
+                        sent_count += 1
                     else:
                         logging.error(f"--> FAILED to send email to {recipient_email}.")
                 else: # safety_check_result == "REJECT"
@@ -236,9 +273,12 @@ def start_outreach(input_csv_file, manual_resume_override):
 
 def _check_and_follow_up_wrapper():
     """Wrapper function to integrate follow-up logic with the global df."""
-    global df, RESUME_CACHE, GMAIL_SERVICE
+    global df, RESUME_CACHE, GMAIL_SERVICE, STOP_BOT_FLAG
+    if STOP_BOT_FLAG:
+        logging.info("Bot stopped by user. Not performing follow-ups.")
+        return df, "Follow-up check stopped by user."
     logging.info("Check Replies & Send Follow-ups initiated.")
-    updated_df, log_messages = check_and_follow_up(GMAIL_SERVICE, df, RESUME_CACHE)
+    updated_df, log_messages = check_and_follow_up(GMAIL_SERVICE, df, RESUME_CACHE, STOP_BOT_FLAG)
     df = updated_df
     save_data()
     logging.info("Check Replies & Send Follow-ups complete.")
@@ -358,7 +398,9 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 )
                 input_csv = gr.File(label="2. Upload Recruiter CSV")
             with gr.Column(scale=2, min_width=100):
+                email_send_count = gr.Number(label="Number of emails to send", value=10, minimum=1, step=1)
                 start_button = gr.Button("3. Load Contacts & Start AI-Powered Outreach", variant="primary")
+                stop_button = gr.Button("STOP Outreach", variant="stop")
         
         gr.Markdown("### Outreach Progress")
         output_dataframe = gr.DataFrame(value=load_data(), label="Email Status", interactive=True)
@@ -390,12 +432,24 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     # --- Button Click Handlers ---
     start_button.click(
         start_outreach,
-        inputs=[input_csv, manual_resume_override_radio],
+        inputs=[input_csv, manual_resume_override_radio, email_send_count],
         outputs=[output_dataframe, outreach_log]
     ).then(
         load_data, outputs=[monitoring_dataframe] # Update the other tab's view
     ).then(
         get_pending_review_emails, outputs=[review_dataframe] # Update the review tab's view
+    )
+
+    def stop_bot():
+        global STOP_BOT_FLAG
+        STOP_BOT_FLAG = True
+        logging.info("STOP_BOT_FLAG set to True. Bot will attempt to stop.")
+        return "Bot stop requested. Please wait for current operation to finish."
+
+    stop_button.click(
+        stop_bot,
+        inputs=[],
+        outputs=[outreach_log]
     )
 
     check_followup_button.click(

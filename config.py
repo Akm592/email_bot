@@ -30,6 +30,11 @@ YOUR_DEGREE = "B.Tech in Information Technology"
 YOUR_KEY_SKILLS = "AI, Machine Learning, Fullstack Development, Data Science"
 YOUR_PROJECT_EXPERIENCE = "built an AI platform that boosted processing speed by 3.5x and cut semantic search latency by 60%"
 
+# new variables to add
+YOUR_LINKEDIN_URL = "https://www.linkedin.com/in/ashish-kumar-mishra-a286a2224/"
+YOUR_GITHUB_URL = "https://github.com/Akm592"
+YOUR_PORTFOLIO_URL = "https://ashishmishra.site"
+
 # Follow-up Campaign Settings
 FOLLOWUP_1_DAYS = 3
 FOLLOWUP_2_DAYS_AFTER_1 = 7
